@@ -9,11 +9,11 @@ use std::rc::Rc;
 
 use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
 
-use crate::service::{Row, SavedRequest, Workspace, matching_requests};
+use crate::service::{Row, SavedRequest, Service, Workspace, matching_requests};
 use crate::store::{self, Loaded};
 use crate::{
     AppWindow, KeyValue, RequestDraft, RequestEntry, ResponseState, RowTable, ServiceEntry, Tables,
-    show_error,
+    curl_text, show_error,
 };
 
 /// The services and where they are saved, shared by the UI callbacks.
@@ -154,6 +154,7 @@ impl Services {
                 Some(RequestEntry {
                     method: request.method.as_str().into(),
                     title: request.title().into(),
+                    curl: curl_text(&draft_from_saved(service, request)).into(),
                     index: ui_index(index),
                 })
             })
@@ -288,6 +289,33 @@ fn table_rows(rows: &[Row]) -> Vec<KeyValue> {
             value: row.value.as_str().into(),
         })
         .collect()
+}
+
+/// Rebuilds the form a saved request would show, so it can be rendered as curl
+/// without loading it.
+fn draft_from_saved(service: &Service, request: &SavedRequest) -> RequestDraft {
+    let rows = |rows: &[Row]| ModelRc::new(VecModel::from(table_rows(rows)));
+    RequestDraft {
+        method: request.method.as_str().into(),
+        scheme: service.scheme.as_str().into(),
+        domain: service.domain.as_str().into(),
+        version: service.version.as_str().into(),
+        endpoint: request.endpoint.as_str().into(),
+        params: rows(&request.params),
+        headers: rows(&request.headers),
+        body_type: request.body_type,
+        body_source: request.body_source,
+        body: request.body.as_str().into(),
+        body_file: request.body_file.as_str().into(),
+        urlencoded_fields: rows(&request.urlencoded_fields),
+        multipart_parts: rows(&request.multipart_parts),
+        auth_type: request.auth_type,
+        auth_token_source: request.auth_token_source,
+        auth_token: request.auth_token.as_str().into(),
+        auth_token_env: request.auth_token_env.as_str().into(),
+        follow_redirects: request.follow_redirects,
+        max_time: request.max_time.as_str().into(),
+    }
 }
 
 /// Copies the form into a [`SavedRequest`], keeping every row, even disabled

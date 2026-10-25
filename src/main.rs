@@ -178,10 +178,15 @@ fn wire_url(ui: &AppWindow) {
 
 /// Fills the curl preview, or explains in a shell comment why the form can't be sent.
 fn wire_curl_preview(ui: &AppWindow) {
-    ui.on_curl_command(|draft| match form_from_draft(&draft) {
-        Ok(form) => curl::command(&form).into(),
-        Err(message) => format!("# {message}").into(),
-    });
+    ui.on_curl_command(|draft| curl_text(&draft).into());
+}
+
+/// Returns the curl command for `draft`, or a shell comment saying why it can't be sent.
+fn curl_text(draft: &RequestDraft) -> String {
+    match form_from_draft(draft) {
+        Ok(form) => curl::command(&form),
+        Err(message) => format!("# {message}"),
+    }
 }
 
 /// Converts a reply into what the response panel displays.
