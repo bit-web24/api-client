@@ -23,11 +23,12 @@ component ServiceBadge inherits Rectangle {
     height: 28px;
     border-radius: 7px;
     background: Theme.accent.transparentize(80%);
+    // "://" is the app's icon: the separator every URL scheme ends with.
     Text {
-        text: "{}";
+        text: "://";
         font-family: Theme.mono-font;
         font-weight: 800;
-        font-size: 11px;
+        font-size: 10px;
         color: Theme.accent-hover;
     }
 }
