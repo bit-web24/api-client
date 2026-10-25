@@ -7,11 +7,14 @@ use std::time::Duration;
 use slint::{Model, ModelExt, ModelRc};
 
 use crate::http::FormPart;
-use crate::request::{Body, Form, Source};
+use crate::request::{BearerToken, Body, EnvVarName, Form, Source};
 use crate::{KeyValue, RequestDraft};
 
 /// Index of "Bearer Token" in the Auth tab's options.
 const AUTH_BEARER: i32 = 1;
+
+/// Index of "Env var $" in the bearer token's source options; the other is "Value".
+const TOKEN_FROM_ENV: i32 = 1;
 
 /// Index of "File @" in the Body tab's source options; the other is "Inline".
 const BODY_SOURCE_FILE: i32 = 1;
@@ -25,11 +28,8 @@ const MAX_TIMEOUT_SECS: u64 = 3600;
 /// # Errors
 ///
 /// Returns a message for the user when the body type is unknown, a needed file
-/// path is missing, or `--max-time` is invalid.
+/// path is missing, the token's variable name is invalid, or `--max-time` is invalid.
 pub fn form_from_draft(draft: &RequestDraft) -> Result<Form, String> {
-    let token = draft.auth_token.trim();
-    let bearer_token =
-        (draft.auth_type == AUTH_BEARER && !token.is_empty()).then(|| token.to_string());
     Ok(Form {
         method: draft.method.to_string(),
         scheme: draft.scheme.to_string(),
@@ -39,10 +39,37 @@ pub fn form_from_draft(draft: &RequestDraft) -> Result<Form, String> {
         params: enabled_pairs(&draft.params),
         headers: enabled_pairs(&draft.headers),
         body: body_from_draft(draft)?,
-        bearer_token,
+        bearer_token: bearer_token(draft)?,
         follow_redirects: draft.follow_redirects,
         timeout: parse_max_time(&draft.max_time)?,
     })
+}
+
+/// Returns the bearer token from the Auth tab: the typed value, or the name of
+/// the environment variable to read it from when sent. A leading `$` is
+/// accepted, as people often type the variable the way a shell expands it.
+///
+/// # Errors
+///
+/// Returns a message when the variable name is missing or not a valid name.
+fn bearer_token(draft: &RequestDraft) -> Result<Option<BearerToken>, String> {
+    if draft.auth_type != AUTH_BEARER {
+        return Ok(None);
+    }
+    if draft.auth_token_source != TOKEN_FROM_ENV {
+        let token = draft.auth_token.trim();
+        return Ok((!token.is_empty()).then(|| BearerToken::Value(token.to_string())));
+    }
+    let name = draft.auth_token_env.trim();
+    let name = name.strip_prefix('$').unwrap_or(name);
+    if name.is_empty() {
+        return Err("Enter the name of the environment variable holding the token.".into());
+    }
+    EnvVarName::parse(name)
+        .map(|name| Some(BearerToken::Env(name)))
+        .ok_or_else(|| {
+            format!("\"{name}\" is not a valid variable name: use letters, digits and _, not starting with a digit.")
+        })
 }
 
 /// Builds the body from the type picked in the Body tab, in the tab's order.
@@ -238,6 +265,55 @@ mod tests {
     #[test]
     fn upload_without_path_is_rejected() {
         assert!(body_from_draft(&draft(5)).is_err());
+    }
+
+    #[test]
+    fn bearer_token_from_value_or_env_var() {
+        let typed = RequestDraft {
+            auth_type: AUTH_BEARER,
+            auth_token: " abc ".into(),
+            ..draft(0)
+        };
+        assert_eq!(
+            bearer_token(&typed),
+            Ok(Some(BearerToken::Value("abc".into())))
+        );
+        let from_env = RequestDraft {
+            auth_type: AUTH_BEARER,
+            auth_token_source: TOKEN_FROM_ENV,
+            auth_token_env: " $API_TOKEN ".into(),
+            ..draft(0)
+        };
+        assert_eq!(
+            bearer_token(&from_env),
+            Ok(Some(BearerToken::Env(
+                EnvVarName::parse("API_TOKEN").unwrap()
+            )))
+        );
+        let no_auth = RequestDraft {
+            auth_token: "abc".into(),
+            ..draft(0)
+        };
+        assert_eq!(bearer_token(&no_auth), Ok(None));
+    }
+
+    #[test]
+    fn env_var_name_must_be_given_and_valid() {
+        let missing = RequestDraft {
+            auth_type: AUTH_BEARER,
+            auth_token_source: TOKEN_FROM_ENV,
+            ..draft(0)
+        };
+        assert!(bearer_token(&missing).is_err());
+        let invalid = RequestDraft {
+            auth_token_env: "API-TOKEN".into(),
+            ..missing
+        };
+        assert!(
+            bearer_token(&invalid)
+                .unwrap_err()
+                .starts_with("\"API-TOKEN\" is not a valid")
+        );
     }
 
     #[test]

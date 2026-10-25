@@ -257,8 +257,10 @@ fn wire_send(ui: &AppWindow) {
         if draft.domain.trim().is_empty() {
             return show_error(&ui, "Enter a domain to send the request to.".into());
         }
-        let request = match form_from_draft(&draft) {
-            Ok(form) => form.into_request(),
+        let request =
+            form_from_draft(&draft).and_then(|form| form.into_request(|name| std::env::var(name)));
+        let request = match request {
+            Ok(request) => request,
             Err(message) => return show_error(&ui, message),
         };
         ui.set_response_state(ResponseState::Sending);
@@ -314,6 +316,8 @@ fn wire_reset(ui: &AppWindow, tables: &Rc<Tables>) {
                 ui.set_body_type(0);
                 ui.set_auth_type(0);
                 ui.set_auth_token("".into());
+                ui.set_auth_token_source(0);
+                ui.set_auth_token_env("".into());
                 apply_default_options(&ui);
                 ui.set_response_state(ResponseState::Idle);
             }

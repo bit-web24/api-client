@@ -1,6 +1,7 @@
 //! Turns what the user entered into a [`Request`] ready to send. Each option
 //! behaves like the `curl` flag it is labelled with in the UI.
 
+use std::env::VarError;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -85,6 +86,37 @@ impl Body {
     }
 }
 
+/// A POSIX shell variable name (`[A-Za-z_][A-Za-z0-9_]*`), so `"$NAME"` is safe
+/// to put in a shell command as is.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EnvVarName(String);
+
+impl EnvVarName {
+    /// Returns the name if `text` is a valid variable name.
+    pub fn parse(text: &str) -> Option<Self> {
+        let mut chars = text.chars();
+        let valid_start = chars
+            .next()
+            .is_some_and(|first| first.is_ascii_alphabetic() || first == '_');
+        let valid_rest = chars.all(|rest| rest.is_ascii_alphanumeric() || rest == '_');
+        (valid_start && valid_rest).then(|| Self(text.to_string()))
+    }
+
+    /// Returns the name as typed.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// Where the `--oauth2-bearer` token comes from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BearerToken {
+    /// Typed into the Auth tab.
+    Value(String),
+    /// Read from the environment when sent, like `"$NAME"` in a shell.
+    Env(EnvVarName),
+}
+
 /// Everything the user entered for one request, already filtered to enabled rows.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Form {
@@ -97,7 +129,7 @@ pub struct Form {
     pub params: Vec<(String, String)>,
     pub headers: Vec<(String, String)>,
     pub body: Body,
-    pub bearer_token: Option<String>,
+    pub bearer_token: Option<BearerToken>,
     /// `curl -L`: follow redirects instead of returning the 3xx response.
     pub follow_redirects: bool,
     /// `curl --max-time`: limit for the whole exchange.
@@ -112,8 +144,17 @@ impl Form {
 
     /// Resolves the form into a request: joins the URL parts and query params, and
     /// adds the headers curl would add (`Content-Type`, `Accept` for `--json`,
-    /// `Authorization`) unless the user set them by hand.
-    pub fn into_request(self) -> Request {
+    /// `Authorization`) unless the user set them by hand. `env` looks up
+    /// environment variables; it is a parameter so tests need no real environment.
+    ///
+    /// # Errors
+    ///
+    /// Returns a message when the bearer token comes from an environment variable
+    /// that is unset, empty or not UTF-8.
+    pub fn into_request(
+        self,
+        env: impl Fn(&str) -> Result<String, VarError>,
+    ) -> Result<Request, String> {
         let mut url = self.base_url();
         append_query(&mut url, &self.params);
 
@@ -130,16 +171,42 @@ impl Form {
         if let Some(token) = self.bearer_token
             && !has_header(&headers, "authorization")
         {
+            let token = match token {
+                BearerToken::Value(value) => value,
+                BearerToken::Env(name) => read_env(&env, &name)?,
+            };
             headers.push(("Authorization".into(), format!("Bearer {token}")));
         }
 
-        Request {
+        Ok(Request {
             method: self.method,
             url,
             headers,
             body: self.body.into_payload(),
             follow_redirects: self.follow_redirects,
             timeout: self.timeout,
+        })
+    }
+}
+
+/// Reads the variable `name` through `env`, trimmed.
+///
+/// # Errors
+///
+/// Returns a message saying how to fix an unset, empty or non-UTF-8 variable.
+fn read_env(
+    env: impl Fn(&str) -> Result<String, VarError>,
+    name: &EnvVarName,
+) -> Result<String, String> {
+    let name = name.as_str();
+    match env(name) {
+        Ok(value) if !value.trim().is_empty() => Ok(value.trim().to_string()),
+        Ok(_) => Err(format!("Environment variable {name} is empty.")),
+        Err(VarError::NotPresent) => Err(format!(
+            "Environment variable {name} is not set. Export it in the shell that launches the app, e.g. export {name}=..."
+        )),
+        Err(VarError::NotUnicode(_)) => {
+            Err(format!("Environment variable {name} is not valid UTF-8."))
         }
     }
 }
@@ -219,6 +286,14 @@ mod tests {
         }
     }
 
+    fn no_env(_name: &str) -> Result<String, VarError> {
+        Err(VarError::NotPresent)
+    }
+
+    fn env_name(name: &str) -> EnvVarName {
+        EnvVarName::parse(name).unwrap()
+    }
+
     fn pair(key: &str, value: &str) -> (String, String) {
         (key.into(), value.into())
     }
@@ -231,7 +306,8 @@ mod tests {
             endpoint: " /users/42\n".into(),
             ..form()
         }
-        .into_request();
+        .into_request(no_env)
+        .unwrap();
         assert_eq!(request.url, "https://api.test/v1/users/42");
     }
 
@@ -241,7 +317,8 @@ mod tests {
             endpoint: "users/".into(),
             ..form()
         }
-        .into_request();
+        .into_request(no_env)
+        .unwrap();
         assert_eq!(request.url, "https://api.test/users/");
     }
 
@@ -252,7 +329,8 @@ mod tests {
             endpoint: String::new(),
             ..form()
         }
-        .into_request();
+        .into_request(no_env)
+        .unwrap();
         assert_eq!(request.url, "https://api.test");
     }
 
@@ -264,7 +342,8 @@ mod tests {
             params,
             ..form()
         }
-        .into_request();
+        .into_request(no_env)
+        .unwrap();
         assert_eq!(
             request.url,
             "https://api.test/s?page=2&q=a%20b%26c&%C3%BCn%C3%AF=1"
@@ -277,13 +356,14 @@ mod tests {
             params: vec![pair("a", "1"), pair("b", "")],
             ..form()
         }
-        .into_request();
+        .into_request(no_env)
+        .unwrap();
         assert_eq!(request.url, "https://api.test/items?a=1&b=");
     }
 
     #[test]
     fn no_body_sends_no_body_and_no_content_type() {
-        let request = form().into_request();
+        let request = form().into_request(no_env).unwrap();
         assert_eq!(request.body, None);
         assert!(request.headers.is_empty());
     }
@@ -294,7 +374,8 @@ mod tests {
             body: Body::Json(Source::Inline("{}".into())),
             ..form()
         }
-        .into_request();
+        .into_request(no_env)
+        .unwrap();
         assert_eq!(request.body, Some(Payload::Text("{}".into())));
         assert_eq!(
             request.headers,
@@ -311,7 +392,8 @@ mod tests {
             body: Body::FormUrlEncoded(Source::Inline("a=1&b=x y".into())),
             ..form()
         }
-        .into_request();
+        .into_request(no_env)
+        .unwrap();
         assert_eq!(request.body, Some(Payload::Text("a=1&b=x y".into())));
         assert_eq!(
             request.headers,
@@ -325,7 +407,8 @@ mod tests {
             body: Body::UrlEncodedPairs(vec![pair("name", "Bittu Kumar"), pair("q", "a&b=c")]),
             ..form()
         }
-        .into_request();
+        .into_request(no_env)
+        .unwrap();
         assert_eq!(
             request.body,
             Some(Payload::Text("name=Bittu%20Kumar&q=a%26b%3Dc".into()))
@@ -346,7 +429,8 @@ mod tests {
             body: Body::Multipart(parts.clone()),
             ..form()
         }
-        .into_request();
+        .into_request(no_env)
+        .unwrap();
         assert_eq!(multipart.body, Some(Payload::Multipart(parts)));
         assert!(multipart.headers.is_empty());
 
@@ -354,7 +438,8 @@ mod tests {
             body: Body::Upload("disk.img".into()),
             ..form()
         }
-        .into_request();
+        .into_request(no_env)
+        .unwrap();
         assert_eq!(upload.body, Some(Payload::File("disk.img".into())));
         assert!(upload.headers.is_empty());
     }
@@ -369,21 +454,77 @@ mod tests {
         let request = Form {
             headers: headers.clone(),
             body: Body::Json(Source::Inline("{}".into())),
-            bearer_token: Some("t".into()),
+            bearer_token: Some(BearerToken::Value("t".into())),
             ..form()
         }
-        .into_request();
+        .into_request(no_env)
+        .unwrap();
         assert_eq!(request.headers, headers);
     }
 
     #[test]
     fn bearer_token_adds_authorization() {
         let request = Form {
-            bearer_token: Some("abc".into()),
+            bearer_token: Some(BearerToken::Value("abc".into())),
             ..form()
         }
-        .into_request();
+        .into_request(no_env)
+        .unwrap();
         assert_eq!(request.headers, vec![pair("Authorization", "Bearer abc")]);
+    }
+
+    #[test]
+    fn bearer_token_can_come_from_the_environment() {
+        let form = Form {
+            bearer_token: Some(BearerToken::Env(env_name("API_TOKEN"))),
+            ..form()
+        };
+        let env = |name: &str| {
+            assert_eq!(name, "API_TOKEN");
+            Ok(" secret \n".to_string())
+        };
+        let request = form.into_request(env).unwrap();
+        assert_eq!(
+            request.headers,
+            vec![pair("Authorization", "Bearer secret")]
+        );
+    }
+
+    #[test]
+    fn unset_or_empty_env_token_is_an_error() {
+        let form = Form {
+            bearer_token: Some(BearerToken::Env(env_name("API_TOKEN"))),
+            ..form()
+        };
+        let unset = form.clone().into_request(no_env).unwrap_err();
+        assert!(unset.starts_with("Environment variable API_TOKEN is not set."));
+        let empty = form.into_request(|_| Ok("  ".into())).unwrap_err();
+        assert_eq!(empty, "Environment variable API_TOKEN is empty.");
+    }
+
+    #[test]
+    fn env_token_is_not_read_when_authorization_is_set_by_hand() {
+        let request = Form {
+            headers: vec![pair("Authorization", "Basic x")],
+            bearer_token: Some(BearerToken::Env(env_name("API_TOKEN"))),
+            ..form()
+        }
+        .into_request(|_| panic!("env must not be read"))
+        .unwrap();
+        assert_eq!(request.headers, vec![pair("Authorization", "Basic x")]);
+    }
+
+    #[test]
+    fn env_var_names_follow_posix_shell_rules() {
+        for valid in ["API_TOKEN", "_x", "a1"] {
+            assert!(EnvVarName::parse(valid).is_some(), "{valid:?} was rejected");
+        }
+        for invalid in ["", "1A", "API-TOKEN", "A B", "$A", "ÄPI"] {
+            assert!(
+                EnvVarName::parse(invalid).is_none(),
+                "{invalid:?} was accepted"
+            );
+        }
     }
 
     #[test]
@@ -392,7 +533,8 @@ mod tests {
             body: Body::Json(Source::File("data/user.json".into())),
             ..form()
         }
-        .into_request();
+        .into_request(no_env)
+        .unwrap();
         assert_eq!(request.body, Some(Payload::File("data/user.json".into())));
     }
 

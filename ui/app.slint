@@ -40,7 +40,10 @@ export struct RequestDraft {
     urlencoded-fields: [KeyValue],
     multipart-parts: [KeyValue],
     auth-type: int,
+    // 0: `auth-token` as typed; 1: read the variable `auth-token-env` when sent.
+    auth-token-source: int,
     auth-token: string,
+    auth-token-env: string,
     follow-redirects: bool,
     max-time: string,
 }
@@ -274,7 +277,9 @@ component RequestPanel inherits Rectangle {
     in property <[KeyValue]> urlencoded-fields;
     in property <[KeyValue]> multipart-parts;
     in-out property <int> auth-type;
+    in-out property <int> auth-token-source;
     in-out property <string> auth-token;
+    in-out property <string> auth-token-env;
     in-out property <bool> follow-redirects;
     in-out property <string> max-time;
     callback add-row(RowTable);
@@ -443,7 +448,11 @@ component RequestPanel inherits Rectangle {
                 text: "No Authorization header will be sent.";
                 color: Theme.text-faint;
             }
-            if root.auth-type == 1: VerticalLayout {
+            if root.auth-type == 1: Segmented {
+                options: ["Value", "Env var  $"];
+                current <=> root.auth-token-source;
+            }
+            if root.auth-type == 1 && root.auth-token-source == 0: VerticalLayout {
                 spacing: 6px;
                 SectionLabel {
                     text: "TOKEN";
@@ -452,6 +461,31 @@ component RequestPanel inherits Rectangle {
                     mono: true;
                     placeholder: "eyJhbGciOi...";
                     text <=> root.auth-token;
+                }
+            }
+            if root.auth-type == 1 && root.auth-token-source == 1: VerticalLayout {
+                spacing: 6px;
+                SectionLabel {
+                    text: "ENVIRONMENT VARIABLE";
+                }
+                HorizontalLayout {
+                    spacing: 8px;
+                    FlagText {
+                        text: "--oauth2-bearer \"$";
+                    }
+                    Input {
+                        horizontal-stretch: 1;
+                        mono: true;
+                        placeholder: "API_TOKEN";
+                        text <=> root.auth-token-env;
+                    }
+                    FlagText {
+                        text: "\"";
+                    }
+                }
+                Note {
+                    text: "Read from the app's environment when the request is sent, as a shell expands \"$NAME\". "
+                        + "Export it in the shell that launches the app. The value never appears in the curl preview.";
                 }
             }
         }
@@ -969,7 +1003,9 @@ export component AppWindow inherits Window {
     in property <[KeyValue]> urlencoded-fields;
     in property <[KeyValue]> multipart-parts;
     in-out property <int> auth-type;
+    in-out property <int> auth-token-source;
     in-out property <string> auth-token;
+    in-out property <string> auth-token-env;
     // Defaults are set from Rust, which also restores them on New Request.
     in-out property <bool> follow-redirects;
     in-out property <string> max-time;
@@ -988,7 +1024,9 @@ export component AppWindow inherits Window {
         urlencoded-fields: root.urlencoded-fields,
         multipart-parts: root.multipart-parts,
         auth-type: root.auth-type,
+        auth-token-source: root.auth-token-source,
         auth-token: root.auth-token,
+        auth-token-env: root.auth-token-env,
         follow-redirects: root.follow-redirects,
         max-time: root.max-time,
     };
@@ -1131,7 +1169,9 @@ export component AppWindow inherits Window {
                         body-source <=> root.body-source;
                         body-file <=> root.body-file;
                         auth-type <=> root.auth-type;
+                        auth-token-source <=> root.auth-token-source;
                         auth-token <=> root.auth-token;
+                        auth-token-env <=> root.auth-token-env;
                         follow-redirects <=> root.follow-redirects;
                         max-time <=> root.max-time;
                         urlencoded-fields: root.urlencoded-fields;

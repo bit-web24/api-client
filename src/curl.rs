@@ -4,7 +4,7 @@
 use std::path::Path;
 
 use crate::http::FormPart;
-use crate::request::{Body, Form, Source, encode_query_component};
+use crate::request::{BearerToken, Body, Form, Source, encode_query_component};
 
 /// Separator between arguments: one option per line, shell-continuation style.
 const ARG_SEPARATOR: &str = " \\\n  ";
@@ -26,8 +26,13 @@ pub fn command(form: &Form) -> String {
     for (name, value) in &form.headers {
         args.push(format!("-H {}", quote(&format!("{name}: {value}"))));
     }
-    if let Some(token) = &form.bearer_token {
-        args.push(format!("--oauth2-bearer {}", quote(token)));
+    match &form.bearer_token {
+        None => {}
+        Some(BearerToken::Value(token)) => args.push(format!("--oauth2-bearer {}", quote(token))),
+        // Double quotes let the shell expand the variable, so the secret never shows here.
+        Some(BearerToken::Env(name)) => {
+            args.push(format!("--oauth2-bearer \"${}\"", name.as_str()));
+        }
     }
     args.extend(body_args(&form.body));
     args.join(ARG_SEPARATOR)
@@ -196,7 +201,7 @@ mod tests {
         let command = command(&Form {
             params: vec![("ünï".into(), "a b".into())],
             headers: vec![("X-Id".into(), "7".into())],
-            bearer_token: Some("tok".into()),
+            bearer_token: Some(BearerToken::Value("tok".into())),
             ..form()
         });
         assert_eq!(
@@ -207,6 +212,17 @@ mod tests {
                 "--oauth2-bearer 'tok'",
             ]
         );
+    }
+
+    #[test]
+    fn env_var_token_is_left_for_the_shell_to_expand() {
+        let command = command(&Form {
+            bearer_token: Some(BearerToken::Env(
+                crate::request::EnvVarName::parse("API_TOKEN").unwrap(),
+            )),
+            ..form()
+        });
+        assert_eq!(lines(&command)[4..], [r#"--oauth2-bearer "$API_TOKEN""#]);
     }
 
     #[test]
