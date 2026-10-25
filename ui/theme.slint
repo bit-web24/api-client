@@ -1,0 +1,53 @@
+// Ubuntu Yaru (dark). Base colours are taken from the installed Yaru-dark GTK 4
+// theme: headerbar #222222, window #2c2c2c, views #272727, borders #131313,
+// accent Ubuntu orange #E95420. The method/status hues come from Yaru's accent
+// variants (blue, purple, red, olive, prussian green) lightened so they stay
+// legible as text on dark surfaces.
+export global Theme {
+    out property <color> background: #2c2c2c;
+    out property <color> titlebar: #222222;
+    out property <color> sidebar: #222222;
+    out property <color> panel: #272727;
+    out property <color> field: #1d1d1d;
+    // Yaru's text-view black; the base-URL box sits on it to read as one unit.
+    out property <color> address-bar: #181818;
+    out property <color> surface: #333333;
+    out property <color> surface-raised: #3c3c3c;
+    out property <color> border: #1b1b1b;
+    out property <color> border-strong: #131313;
+
+    out property <color> text: #f7f7f7;
+    out property <color> text-muted: #ffffffb3;
+    out property <color> text-faint: #ffffff80;
+
+    out property <color> accent: #e95420;
+    out property <color> accent-hover: #ec6d40;
+    out property <color> on-accent: #ffffff;
+    out property <color> selection: #e9542066;
+
+    out property <color> success: #6cc24a;
+    out property <color> warning: #f99b11;
+    out property <color> danger: #f0607a;
+    out property <color> info: #4fb3b7;
+    out property <color> blue: #4c9df5;
+    out property <color> purple: #a496ec;
+
+    out property <length> radius: 6px;
+    out property <length> font-size: 13px;
+    out property <length> font-size-small: 11px;
+    out property <string> ui-font: "Ubuntu Sans";
+    out property <string> mono-font: "JetBrains Mono";
+
+    public pure function method-color(method: string) -> color {
+        return method == "GET" ? success
+            : method == "POST" ? warning
+            : method == "PUT" ? blue
+            : method == "PATCH" ? purple
+            : method == "DELETE" ? danger
+            : info;
+    }
+
+    public pure function status-color(code: int) -> color {
+        return code >= 500 ? danger : code >= 400 ? warning : code >= 300 ? info : success;
+    }
+}

@@ -1,0 +1,13 @@
+[package]
+name = "api-client"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+percent-encoding = "2.3.2"
+serde_json = { version = "1.0.154", features = ["preserve_order"] }
+slint = "1.18.1"
+ureq = "3.5.0"
+
+[build-dependencies]
+slint-build = "1.18.1"

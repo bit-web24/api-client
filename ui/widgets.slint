@@ -1,0 +1,475 @@
+import { ListView } from "std-widgets.slint";
+import { Theme } from "theme.slint";
+
+export struct KeyValue {
+    enabled: bool,
+    key: string,
+    value: string,
+}
+
+export struct TabItem {
+    label: string,
+    count: int,
+    // curl option this tab corresponds to, e.g. "-H"; empty for none.
+    flag: string,
+}
+
+// A curl option name (e.g. "-H") shown next to the control it corresponds to.
+export component FlagText inherits Text {
+    font-family: Theme.mono-font;
+    font-size: Theme.font-size-small;
+    color: Theme.info;
+    vertical-alignment: center;
+}
+
+export component Button inherits Rectangle {
+    in property <string> text;
+    in property <bool> primary;
+    callback clicked();
+
+    min-height: 32px;
+    border-radius: Theme.radius;
+    border-width: primary ? 0 : 1px;
+    border-color: Theme.border-strong;
+    background: primary
+        ? (touch.pressed ? Theme.accent : touch.has-hover ? Theme.accent-hover : Theme.accent)
+        : (touch.has-hover ? Theme.surface-raised : Theme.surface);
+
+    HorizontalLayout {
+        padding-left: 16px;
+        padding-right: 16px;
+        Text {
+            text: root.text;
+            color: root.primary ? Theme.on-accent : Theme.text;
+            font-weight: 600;
+            vertical-alignment: center;
+            horizontal-alignment: center;
+        }
+    }
+
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => {
+            root.clicked();
+        }
+    }
+}
+
+export component Input inherits Rectangle {
+    in property <string> placeholder;
+    in property <bool> mono;
+    in property <bool> borderless;
+    in-out property <string> text;
+    callback edited(string);
+    callback accepted();
+
+    min-height: 32px;
+    clip: true;
+    forward-focus: input;
+    border-radius: Theme.radius;
+    border-width: borderless && !input.has-focus ? 0 : 1px;
+    border-color: input.has-focus ? Theme.accent : Theme.border-strong;
+    background: borderless && !input.has-focus ? transparent : Theme.field;
+
+    if root.text == "": Text {
+        x: 10px;
+        height: root.height;
+        text: root.placeholder;
+        color: Theme.text-faint;
+        font-family: root.mono ? Theme.mono-font : "";
+        vertical-alignment: center;
+    }
+
+    HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 10px;
+        input := TextInput {
+            text <=> root.text;
+            color: Theme.text;
+            font-family: root.mono ? Theme.mono-font : "";
+            selection-background-color: Theme.selection;
+            selection-foreground-color: Theme.text;
+            vertical-alignment: center;
+            single-line: true;
+            edited => {
+                root.edited(self.text);
+            }
+            accepted => {
+                root.accepted();
+            }
+        }
+    }
+}
+
+export component CheckBox inherits Rectangle {
+    in-out property <bool> checked;
+    callback toggled(bool);
+
+    width: 16px;
+    height: 16px;
+    border-radius: 4px;
+    border-width: checked ? 0 : 1px;
+    border-color: touch.has-hover ? Theme.accent : Theme.border-strong;
+    background: checked ? Theme.accent : transparent;
+
+    if root.checked: Path {
+        width: 10px;
+        height: 8px;
+        viewbox-width: 10;
+        viewbox-height: 8;
+        commands: "M 1 4 L 4 7 L 9 1";
+        stroke: Theme.on-accent;
+        stroke-width: 2px;
+    }
+
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => {
+            root.checked = !root.checked;
+            root.toggled(root.checked);
+        }
+    }
+}
+
+export component Chevron inherits Path {
+    width: 9px;
+    height: 5px;
+    viewbox-width: 9;
+    viewbox-height: 5;
+    commands: "M 0.5 0.5 L 4.5 4.5 L 8.5 0.5";
+    stroke: Theme.text-muted;
+    stroke-width: 1.5px;
+}
+
+// Underlined tab strip; a non-zero `count` renders as a small pill after the label.
+export component TabBar {
+    in property <[TabItem]> tabs;
+    in-out property <int> current;
+
+    min-height: 36px;
+
+    Rectangle {
+        y: parent.height - 1px;
+        height: 1px;
+        background: Theme.border;
+    }
+
+    HorizontalLayout {
+        alignment: start;
+        spacing: 4px;
+        for tab[index] in root.tabs: Rectangle {
+            HorizontalLayout {
+                padding-left: 10px;
+                padding-right: 10px;
+                spacing: 6px;
+                Text {
+                    text: tab.label;
+                    vertical-alignment: center;
+                    color: index == root.current ? Theme.text : (tab-touch.has-hover ? Theme.text : Theme.text-muted);
+                    font-weight: index == root.current ? 600 : 400;
+                }
+                if tab.flag != "": FlagText {
+                    text: tab.flag;
+                }
+                if tab.count > 0: Rectangle {
+                    y: (parent.height - self.height) / 2;
+                    height: 18px;
+                    min-width: 18px;
+                    border-radius: 9px;
+                    background: Theme.surface-raised;
+                    HorizontalLayout {
+                        padding-left: 5px;
+                        padding-right: 5px;
+                        Text {
+                            text: tab.count;
+                            font-size: Theme.font-size-small;
+                            color: Theme.text-muted;
+                            vertical-alignment: center;
+                            horizontal-alignment: center;
+                        }
+                    }
+                }
+            }
+
+            Rectangle {
+                y: parent.height - self.height;
+                height: 2px;
+                border-radius: 1px;
+                background: index == root.current ? Theme.accent : transparent;
+            }
+
+            tab-touch := TouchArea {
+                mouse-cursor: pointer;
+                clicked => {
+                    root.current = index;
+                }
+            }
+        }
+    }
+}
+
+// Button showing `value` that opens a list of `options` to pick from.
+// With `method-colors`, options are drawn in their HTTP method colour.
+export component Dropdown inherits Rectangle {
+    in property <[string]> options;
+    in-out property <string> value;
+    in property <bool> mono;
+    in property <bool> method-colors;
+    // Transparent until hovered, for use inside another field such as the address box.
+    in property <bool> flat;
+    // curl option shown before the value, e.g. "-X"; empty for none.
+    in property <string> flag;
+
+    pure function option-color(option: string) -> color {
+        return root.method-colors ? Theme.method-color(option) : Theme.text;
+    }
+
+    min-height: 32px;
+    border-radius: Theme.radius;
+    background: touch.has-hover ? Theme.surface-raised : flat ? transparent : Theme.surface;
+
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 10px;
+        spacing: 8px;
+        if root.flag != "": FlagText {
+            text: root.flag;
+        }
+        Text {
+            horizontal-stretch: 1;
+            text: root.value;
+            color: root.option-color(root.value);
+            font-weight: root.method-colors ? 700 : 400;
+            font-family: root.mono ? Theme.mono-font : "";
+            vertical-alignment: center;
+        }
+        Chevron {
+            y: (parent.height - self.height) / 2;
+        }
+    }
+
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => {
+            popup.show();
+        }
+    }
+
+    popup := PopupWindow {
+        x: 0;
+        y: root.height + 4px;
+        width: root.width + 24px;
+
+        Rectangle {
+            border-radius: Theme.radius;
+            border-width: 1px;
+            border-color: Theme.border-strong;
+            background: Theme.surface;
+            drop-shadow-blur: 16px;
+            drop-shadow-offset-y: 4px;
+            drop-shadow-color: #00000080;
+
+            VerticalLayout {
+                padding: 4px;
+                for option in root.options: Rectangle {
+                    height: 30px;
+                    border-radius: 4px;
+                    background: item-touch.has-hover ? Theme.surface-raised : transparent;
+                    HorizontalLayout {
+                        padding-left: 10px;
+                        Text {
+                            text: option;
+                            color: root.option-color(option);
+                            font-weight: root.method-colors ? 700 : 400;
+                            font-family: root.mono ? Theme.mono-font : "";
+                            vertical-alignment: center;
+                        }
+                    }
+
+                    item-touch := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => {
+                            root.value = option;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// Postman-style table of toggleable key/value pairs. Edits are reported through
+// callbacks so the owner of `rows` stays the single source of truth.
+export component KeyValueEditor {
+    in property <[KeyValue]> rows;
+    in property <string> key-placeholder: "Key";
+    in property <string> value-placeholder: "Value";
+    callback add-row();
+    callback remove-row(int);
+    callback row-edited(int, KeyValue);
+
+    VerticalLayout {
+        Rectangle {
+            height: 30px;
+            HorizontalLayout {
+                padding-left: 12px;
+                padding-right: 12px;
+                spacing: 8px;
+                Rectangle {
+                    width: 16px;
+                }
+                Text {
+                    text: "KEY";
+                    horizontal-stretch: 1;
+                    font-size: Theme.font-size-small;
+                    font-weight: 600;
+                    letter-spacing: 0.6px;
+                    color: Theme.text-faint;
+                    vertical-alignment: center;
+                }
+                Text {
+                    text: "VALUE";
+                    horizontal-stretch: 1;
+                    font-size: Theme.font-size-small;
+                    font-weight: 600;
+                    letter-spacing: 0.6px;
+                    color: Theme.text-faint;
+                    vertical-alignment: center;
+                }
+                Rectangle {
+                    width: 24px;
+                }
+            }
+        }
+
+        ListView {
+            vertical-stretch: 1;
+            for row[index] in root.rows: Rectangle {
+                height: 38px;
+                background: row-touch.has-hover ? Theme.surface : transparent;
+                row-touch := TouchArea { }
+
+                HorizontalLayout {
+                    padding-left: 12px;
+                    padding-right: 12px;
+                    padding-top: 3px;
+                    padding-bottom: 3px;
+                    spacing: 8px;
+                    CheckBox {
+                        y: (parent.height - self.height) / 2;
+                        checked: row.enabled;
+                        toggled(checked) => {
+                            root.row-edited(index, { enabled: checked, key: row.key, value: row.value });
+                        }
+                    }
+                    Input {
+                        horizontal-stretch: 1;
+                        borderless: true;
+                        mono: true;
+                        text: row.key;
+                        placeholder: root.key-placeholder;
+                        edited(text) => {
+                            root.row-edited(index, { enabled: row.enabled, key: text, value: row.value });
+                        }
+                    }
+                    Input {
+                        horizontal-stretch: 1;
+                        borderless: true;
+                        mono: true;
+                        text: row.value;
+                        placeholder: root.value-placeholder;
+                        edited(text) => {
+                            root.row-edited(index, { enabled: row.enabled, key: row.key, value: text });
+                        }
+                    }
+                    Rectangle {
+                        width: 24px;
+                        border-radius: 4px;
+                        background: remove-touch.has-hover ? Theme.surface-raised : transparent;
+                        Text {
+                            text: "×";
+                            font-size: 16px;
+                            color: remove-touch.has-hover ? Theme.danger : Theme.text-faint;
+                        }
+                        remove-touch := TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => {
+                                root.remove-row(index);
+                            }
+                        }
+                    }
+                }
+
+                Rectangle {
+                    y: parent.height - 1px;
+                    height: 1px;
+                    background: Theme.border;
+                }
+            }
+        }
+
+        HorizontalLayout {
+            alignment: start;
+            padding: 8px;
+            Rectangle {
+                height: 28px;
+                border-radius: 4px;
+                background: add-touch.has-hover ? Theme.surface : transparent;
+                HorizontalLayout {
+                    padding-left: 8px;
+                    padding-right: 10px;
+                    Text {
+                        text: "+  Add row";
+                        color: add-touch.has-hover ? Theme.accent : Theme.text-muted;
+                        vertical-alignment: center;
+                    }
+                }
+                add-touch := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => {
+                        root.add-row();
+                    }
+                }
+            }
+        }
+    }
+}
+
+// Scrollable monospace text area; `read-only` turns it into a selectable viewer.
+export component CodeView inherits Rectangle {
+    in-out property <string> text;
+    in property <bool> read-only;
+    in property <string> placeholder;
+
+    clip: true;
+    border-radius: Theme.radius;
+    border-width: 1px;
+    border-color: editor.has-focus && !read-only ? Theme.accent : Theme.border;
+    background: Theme.field;
+
+    flick := Flickable {
+        content-height: editor.height + 24px;
+        editor := TextInput {
+            x: 14px;
+            y: 12px;
+            width: flick.width - 28px;
+            height: max(self.preferred-height, flick.height - 24px);
+            text <=> root.text;
+            read-only: root.read-only;
+            single-line: false;
+            wrap: word-wrap;
+            font-family: Theme.mono-font;
+            color: Theme.text;
+            selection-background-color: Theme.selection;
+            selection-foreground-color: Theme.text;
+        }
+    }
+
+    if root.text == "": Text {
+        x: 14px;
+        y: 12px;
+        text: root.placeholder;
+        color: Theme.text-faint;
+        font-family: Theme.mono-font;
+    }
+}

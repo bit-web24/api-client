@@ -1,0 +1,209 @@
+import { Theme } from "theme.slint";
+
+export enum SettingsAction {
+    new-request,
+    import-collection,
+    export-collection,
+    clear-response,
+    quit,
+}
+
+export struct SettingsItem {
+    action: SettingsAction,
+    label: string,
+    // SVG path commands on a 24×24 grid, drawn as an outline.
+    icon: string,
+    shortcut: string,
+    // Disabled items are features not built yet; they show a "Soon" tag instead of a shortcut.
+    enabled: bool,
+    // Draws a divider above the item, starting a new group.
+    group-start: bool,
+}
+
+// Outline icons from Lucide (https://lucide.dev, ISC licence).
+export global Icons {
+    out property <string> settings: "M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z M9 12a3 3 0 1 0 6 0a3 3 0 1 0 -6 0";
+    out property <string> plus: "M5 12h14 M12 5v14";
+    out property <string> download: "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4 M7 10l5 5 5-5 M12 15V3";
+    out property <string> upload: "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4 M17 8l-5-5-5 5 M12 3v12";
+    out property <string> clear: "M2 12a10 10 0 1 0 20 0a10 10 0 1 0 -20 0 M15 9l-6 6 M9 9l6 6";
+    out property <string> log-out: "M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4 M16 17l5-5-5-5 M21 12H9";
+}
+
+component Icon inherits Path {
+    width: 18px;
+    height: 18px;
+    viewbox-width: 24;
+    viewbox-height: 24;
+    stroke-width: 1.6px;
+    stroke-line-cap: round;
+    stroke-line-join: round;
+}
+
+component SettingsRow inherits Rectangle {
+    in property <SettingsItem> item;
+    callback activated();
+
+    property <bool> highlighted: item.enabled && touch.has-hover;
+    property <color> tint: highlighted ? Theme.accent-hover : Theme.text;
+
+    height: 40px;
+    border-radius: 8px;
+    border-width: highlighted ? 1px : 0;
+    border-color: Theme.accent.transparentize(55%);
+    background: highlighted ? Theme.accent.transparentize(85%) : transparent;
+
+    HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 10px;
+        spacing: 12px;
+        Icon {
+            y: (parent.height - self.height) / 2;
+            commands: root.item.icon;
+            stroke: root.highlighted ? Theme.accent-hover : Theme.text-muted;
+            opacity: root.item.enabled ? 1 : 0.45;
+        }
+        Text {
+            horizontal-stretch: 1;
+            text: root.item.label;
+            color: root.tint;
+            opacity: root.item.enabled ? 1 : 0.45;
+            font-weight: 500;
+            vertical-alignment: center;
+        }
+        if root.item.enabled: Text {
+            text: root.item.shortcut;
+            color: root.highlighted ? Theme.accent-hover : Theme.text-faint;
+            font-size: 12px;
+            vertical-alignment: center;
+        }
+        if !root.item.enabled: Rectangle {
+            y: (parent.height - self.height) / 2;
+            height: 20px;
+            border-radius: 10px;
+            background: Theme.surface-raised;
+            HorizontalLayout {
+                padding-left: 8px;
+                padding-right: 8px;
+                Text {
+                    text: "Soon";
+                    font-size: Theme.font-size-small;
+                    color: Theme.text-muted;
+                    vertical-alignment: center;
+                }
+            }
+        }
+    }
+
+    touch := TouchArea {
+        enabled: root.item.enabled;
+        mouse-cursor: root.item.enabled ? pointer : default;
+        clicked => {
+            root.activated();
+        }
+    }
+}
+
+// Round gear button for the title bar that opens the settings menu below it,
+// right-aligned with the button.
+export component SettingsButton {
+    in property <[SettingsItem]> items;
+    in property <string> app-version;
+    callback activated(SettingsAction);
+
+    width: 40px;
+
+    Rectangle {
+        width: 32px;
+        height: 32px;
+        border-radius: 16px;
+        background: touch.pressed ? #ffffff1a : touch.has-hover ? #ffffff26 : #ffffff14;
+        Icon {
+            width: 18px;
+            height: 18px;
+            commands: Icons.settings;
+            stroke: Theme.text;
+            stroke-width: 2px;
+        }
+    }
+
+    touch := TouchArea {
+        clicked => {
+            menu.show();
+        }
+    }
+
+    menu := PopupWindow {
+        // Clicks on disabled items must not dismiss the menu, so it closes itself on activation.
+        close-policy: close-on-click-outside;
+        width: 300px;
+        x: root.width - self.width;
+        y: root.height + 10px;
+
+        Rectangle {
+            border-radius: 16px;
+            border-width: 1px;
+            border-color: #ffffff14;
+            background: Theme.background;
+            drop-shadow-blur: 24px;
+            drop-shadow-offset-y: 8px;
+            drop-shadow-color: #00000099;
+
+            VerticalLayout {
+                padding: 8px;
+                spacing: 2px;
+
+                HorizontalLayout {
+                    padding: 10px;
+                    spacing: 12px;
+                    Rectangle {
+                        width: 40px;
+                        height: 40px;
+                        border-radius: 20px;
+                        background: Theme.accent;
+                        Text {
+                            text: "{}";
+                            color: Theme.on-accent;
+                            font-weight: 800;
+                            font-family: Theme.mono-font;
+                        }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        spacing: 2px;
+                        Text {
+                            text: "API Client";
+                            font-size: 15px;
+                            font-weight: 700;
+                            color: Theme.text;
+                        }
+                        Text {
+                            text: "Version " + root.app-version;
+                            color: Theme.text-muted;
+                        }
+                    }
+                }
+
+                for item in root.items: VerticalLayout {
+                    if item.group-start: Rectangle {
+                        height: 13px;
+                        Rectangle {
+                            x: 10px;
+                            y: 6px;
+                            width: parent.width - 20px;
+                            height: 1px;
+                            background: #ffffff1a;
+                        }
+                    }
+                    SettingsRow {
+                        item: item;
+                        activated => {
+                            menu.close();
+                            root.activated(item.action);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

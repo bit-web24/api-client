@@ -1,0 +1,1176 @@
+import { ListView } from "std-widgets.slint";
+import { Theme } from "theme.slint";
+import { Button, CheckBox, Input, TabBar, TabItem, Dropdown, FlagText, KeyValue, KeyValueEditor, CodeView } from "widgets.slint";
+import { Icons, SettingsAction, SettingsButton, SettingsItem } from "settings_menu.slint";
+
+export { KeyValue }
+
+export enum ResponseState {
+    idle,
+    sending,
+    received,
+    failed,
+}
+
+// The editable key/value tables; row callbacks say which one they act on.
+export enum RowTable {
+    params,
+    headers,
+    urlencoded-fields,
+    multipart-parts,
+}
+
+// Everything the request form holds, in one value Rust can read at once, both to
+// send it and to render the equivalent curl command.
+export struct RequestDraft {
+    method: string,
+    scheme: string,
+    domain: string,
+    version: string,
+    endpoint: string,
+    params: [KeyValue],
+    headers: [KeyValue],
+    // Index into the Body tab's list of curl body types.
+    body-type: int,
+    // 0: typed inline; 1: read from `body-file` when sent (curl's @file).
+    body-source: int,
+    body: string,
+    // Path for `@file` bodies and for `-T` uploads.
+    body-file: string,
+    urlencoded-fields: [KeyValue],
+    multipart-parts: [KeyValue],
+    auth-type: int,
+    auth-token: string,
+    follow-redirects: bool,
+    max-time: string,
+}
+
+export struct HistoryEntry {
+    method: string,
+    url: string,
+}
+
+export struct Response {
+    status-code: int,
+    status-text: string,
+    elapsed: string,
+    size: string,
+    format: string,
+    body: string,
+    headers: [KeyValue],
+}
+
+// Single-select row of pill buttons, used for body type and auth type.
+component Segmented {
+    in property <[string]> options;
+    in-out property <int> current;
+
+    HorizontalLayout {
+        alignment: start;
+        spacing: 6px;
+        for option[index] in root.options: Rectangle {
+            height: 26px;
+            border-radius: 13px;
+            border-width: 1px;
+            border-color: index == root.current ? Theme.accent : Theme.border-strong;
+            background: index == root.current ? Theme.selection : (touch.has-hover ? Theme.surface : transparent);
+            HorizontalLayout {
+                padding-left: 12px;
+                padding-right: 12px;
+                Text {
+                    text: option;
+                    font-size: 12px;
+                    color: index == root.current ? Theme.text : Theme.text-muted;
+                    vertical-alignment: center;
+                }
+            }
+            touch := TouchArea {
+                mouse-cursor: pointer;
+                clicked => {
+                    root.current = index;
+                }
+            }
+        }
+    }
+}
+
+component SectionLabel inherits Text {
+    font-size: Theme.font-size-small;
+    font-weight: 600;
+    letter-spacing: 0.8px;
+    color: Theme.text-faint;
+}
+
+component EmptyState {
+    in property <string> title;
+    in property <string> hint;
+
+    VerticalLayout {
+        alignment: center;
+        spacing: 6px;
+        Text {
+            text: root.title;
+            color: Theme.text-muted;
+            font-size: 14px;
+            font-weight: 600;
+            horizontal-alignment: center;
+        }
+        Text {
+            text: root.hint;
+            color: Theme.text-faint;
+            horizontal-alignment: center;
+            wrap: word-wrap;
+        }
+    }
+}
+
+component Sidebar inherits Rectangle {
+    in property <[HistoryEntry]> history;
+    in-out property <string> search;
+    callback history-selected(int);
+
+    background: Theme.sidebar;
+
+    VerticalLayout {
+        padding: 16px;
+        spacing: 14px;
+
+        Input {
+            placeholder: "Search history";
+            text <=> root.search;
+        }
+
+        SectionLabel {
+            text: "HISTORY";
+        }
+
+        if root.history.length == 0: EmptyState {
+            vertical-stretch: 1;
+            title: "No requests yet";
+            hint: "Requests you send will show up here.";
+        }
+
+        if root.history.length > 0: ListView {
+            vertical-stretch: 1;
+            for entry[index] in root.history: Rectangle {
+                height: 34px;
+                border-radius: 4px;
+                background: touch.has-hover ? Theme.surface : transparent;
+                HorizontalLayout {
+                    padding-left: 8px;
+                    padding-right: 8px;
+                    spacing: 8px;
+                    Text {
+                        width: 52px;
+                        text: entry.method;
+                        font-size: Theme.font-size-small;
+                        font-weight: 700;
+                        color: Theme.method-color(entry.method);
+                        vertical-alignment: center;
+                    }
+                    Text {
+                        text: entry.url;
+                        color: Theme.text-muted;
+                        overflow: elide;
+                        vertical-alignment: center;
+                    }
+                }
+                touch := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => {
+                        root.history-selected(index);
+                    }
+                }
+            }
+        }
+    }
+}
+
+struct BodyType {
+    mime: string,
+    flag: string,
+}
+
+// Scrollable list of curl's body types: the Content-Type sent, with the curl flag below.
+component BodyTypeList {
+    in property <[BodyType]> types;
+    in-out property <int> current;
+
+    ListView {
+        for type[index] in root.types: Rectangle {
+            height: 40px;
+            border-radius: 6px;
+            border-width: index == root.current ? 1px : 0;
+            border-color: Theme.accent.transparentize(50%);
+            background: index == root.current ? Theme.selection : touch.has-hover ? Theme.surface : transparent;
+            VerticalLayout {
+                padding-left: 10px;
+                padding-right: 10px;
+                alignment: center;
+                spacing: 1px;
+                Text {
+                    text: type.mime;
+                    font-family: Theme.mono-font;
+                    font-size: 12px;
+                    color: index == root.current ? Theme.text : Theme.text-muted;
+                    overflow: elide;
+                }
+                FlagText {
+                    text: type.flag;
+                }
+            }
+            touch := TouchArea {
+                mouse-cursor: pointer;
+                clicked => {
+                    root.current = index;
+                }
+            }
+        }
+    }
+}
+
+// Path box for bodies read from a file, labelled with the curl flag that reads it.
+component BodyFileInput {
+    in property <string> flag;
+    in property <string> placeholder;
+    in property <string> note;
+    in-out property <string> path;
+
+    VerticalLayout {
+        alignment: start;
+        spacing: 8px;
+        HorizontalLayout {
+            spacing: 8px;
+            FlagText {
+                text: root.flag;
+            }
+            Input {
+                horizontal-stretch: 1;
+                mono: true;
+                placeholder: root.placeholder;
+                text <=> root.path;
+            }
+        }
+        Text {
+            text: root.note;
+            color: Theme.text-faint;
+            wrap: word-wrap;
+        }
+    }
+}
+
+component Note inherits Text {
+    color: Theme.text-faint;
+    wrap: word-wrap;
+}
+
+component RequestPanel inherits Rectangle {
+    in property <[KeyValue]> params;
+    in property <[KeyValue]> headers;
+    in-out property <string> body;
+    in-out property <int> body-type;
+    in-out property <int> body-source;
+    in-out property <string> body-file;
+    in property <[KeyValue]> urlencoded-fields;
+    in property <[KeyValue]> multipart-parts;
+    in-out property <int> auth-type;
+    in-out property <string> auth-token;
+    in-out property <bool> follow-redirects;
+    in-out property <string> max-time;
+    callback add-row(RowTable);
+    callback remove-row(RowTable, int);
+    callback row-edited(RowTable, int, KeyValue);
+
+    property <int> tab;
+
+    border-radius: Theme.radius;
+    border-width: 1px;
+    border-color: Theme.border;
+    background: Theme.panel;
+    clip: true;
+
+    VerticalLayout {
+        TabBar {
+            tabs: [
+                { label: "Params", count: root.params.length, flag: "--url-query" },
+                { label: "Headers", count: root.headers.length, flag: "-H" },
+                { label: "Body", flag: "-d -F -T" },
+                { label: "Auth", flag: "--oauth2-bearer" },
+                { label: "Options", flag: "-L --max-time" },
+            ];
+            current <=> root.tab;
+        }
+
+        if root.tab == 0: KeyValueEditor {
+            vertical-stretch: 1;
+            rows: root.params;
+            key-placeholder: "parameter";
+            add-row => {
+                root.add-row(RowTable.params);
+            }
+            remove-row(index) => {
+                root.remove-row(RowTable.params, index);
+            }
+            row-edited(index, row) => {
+                root.row-edited(RowTable.params, index, row);
+            }
+        }
+
+        if root.tab == 1: KeyValueEditor {
+            vertical-stretch: 1;
+            rows: root.headers;
+            key-placeholder: "Header-Name";
+            add-row => {
+                root.add-row(RowTable.headers);
+            }
+            remove-row(index) => {
+                root.remove-row(RowTable.headers, index);
+            }
+            row-edited(index, row) => {
+                root.row-edited(RowTable.headers, index, row);
+            }
+        }
+
+        if root.tab == 2: HorizontalLayout {
+            vertical-stretch: 1;
+            padding: 12px;
+            spacing: 12px;
+            // Named by the Content-Type each sends, in the order Rust maps them (src/draft.rs).
+            BodyTypeList {
+                width: 290px;
+                types: [
+                    { mime: "none", flag: "(no body)" },
+                    { mime: "application/json", flag: "--json" },
+                    { mime: "application/x-www-form-urlencoded", flag: "--data-raw / --data-binary @" },
+                    { mime: "application/x-www-form-urlencoded", flag: "--data-urlencode" },
+                    { mime: "multipart/form-data", flag: "-F / --form-string" },
+                    { mime: "(none) raw file upload", flag: "-T, --upload-file" },
+                ];
+                current <=> root.body-type;
+            }
+            Rectangle {
+                width: 1px;
+                background: Theme.border;
+            }
+            VerticalLayout {
+                horizontal-stretch: 1;
+                spacing: 10px;
+
+                if root.body-type == 0: EmptyState {
+                    vertical-stretch: 1;
+                    title: "This request has no body";
+                    hint: "Pick a body type on the left, as you would pick a curl flag.";
+                }
+
+                if root.body-type == 1 || root.body-type == 2: Segmented {
+                    options: ["Inline", "File  @"];
+                    current <=> root.body-source;
+                }
+                if (root.body-type == 1 || root.body-type == 2) && root.body-source == 0: CodeView {
+                    vertical-stretch: 1;
+                    text <=> root.body;
+                    placeholder: root.body-type == 1 ? "{\n  \"key\": \"value\"\n}" : "name=Bittu%20Kumar&lang=rust";
+                }
+                if root.body-type == 2 && root.body-source == 0: Note {
+                    text: "Sent verbatim, as with --data-raw: percent-encode reserved characters yourself.";
+                }
+                if (root.body-type == 1 || root.body-type == 2) && root.body-source == 1: BodyFileInput {
+                    vertical-stretch: 1;
+                    flag: root.body-type == 1 ? "--json @" : "--data-binary @";
+                    placeholder: root.body-type == 1 ? "./payload.json" : "./form.txt";
+                    note: "Read when the request is sent; its bytes go out unchanged. "
+                        + "Relative paths start from the folder the app was launched in, as with curl.";
+                    path <=> root.body-file;
+                }
+
+                if root.body-type == 3: KeyValueEditor {
+                    vertical-stretch: 1;
+                    rows: root.urlencoded-fields;
+                    key-placeholder: "name";
+                    add-row => {
+                        root.add-row(RowTable.urlencoded-fields);
+                    }
+                    remove-row(index) => {
+                        root.remove-row(RowTable.urlencoded-fields, index);
+                    }
+                    row-edited(index, row) => {
+                        root.row-edited(RowTable.urlencoded-fields, index, row);
+                    }
+                }
+                if root.body-type == 3: Note {
+                    text: "Each value is percent-encoded and the pairs are joined with &, like repeated --data-urlencode name=value.";
+                }
+
+                if root.body-type == 4: KeyValueEditor {
+                    vertical-stretch: 1;
+                    rows: root.multipart-parts;
+                    key-placeholder: "field";
+                    value-placeholder: "value, or @path/to/file";
+                    add-row => {
+                        root.add-row(RowTable.multipart-parts);
+                    }
+                    remove-row(index) => {
+                        root.remove-row(RowTable.multipart-parts, index);
+                    }
+                    row-edited(index, row) => {
+                        root.row-edited(RowTable.multipart-parts, index, row);
+                    }
+                }
+                if root.body-type == 4: Note {
+                    text: "A value starting with @ uploads that file (-F name=@path); any other value is sent literally (--form-string).";
+                }
+
+                if root.body-type == 5: BodyFileInput {
+                    vertical-stretch: 1;
+                    flag: "-T";
+                    placeholder: "./disk.img";
+                    note: "Uploaded byte for byte with no Content-Type. Without -X, curl uses PUT for -T.";
+                    path <=> root.body-file;
+                }
+            }
+        }
+
+        if root.tab == 3: VerticalLayout {
+            vertical-stretch: 1;
+            alignment: start;
+            padding: 12px;
+            spacing: 12px;
+            Segmented {
+                options: ["No Auth", "Bearer Token  --oauth2-bearer"];
+                current <=> root.auth-type;
+            }
+            if root.auth-type == 0: Text {
+                text: "No Authorization header will be sent.";
+                color: Theme.text-faint;
+            }
+            if root.auth-type == 1: VerticalLayout {
+                spacing: 6px;
+                SectionLabel {
+                    text: "TOKEN";
+                }
+                Input {
+                    mono: true;
+                    placeholder: "eyJhbGciOi...";
+                    text <=> root.auth-token;
+                }
+            }
+        }
+
+        if root.tab == 4: VerticalLayout {
+            vertical-stretch: 1;
+            alignment: start;
+            padding: 12px;
+            spacing: 14px;
+            HorizontalLayout {
+                alignment: start;
+                spacing: 10px;
+                CheckBox {
+                    y: (parent.height - self.height) / 2;
+                    checked <=> root.follow-redirects;
+                }
+                FlagText {
+                    text: "-L";
+                }
+                Text {
+                    text: "Follow redirects (up to 50, curl's --max-redirs default)";
+                    color: Theme.text;
+                    vertical-alignment: center;
+                }
+            }
+            HorizontalLayout {
+                alignment: start;
+                spacing: 10px;
+                FlagText {
+                    text: "--max-time";
+                }
+                Input {
+                    width: 72px;
+                    mono: true;
+                    placeholder: "30";
+                    text <=> root.max-time;
+                }
+                Text {
+                    text: "seconds for the whole request";
+                    color: Theme.text-muted;
+                    vertical-alignment: center;
+                }
+            }
+        }
+    }
+}
+
+component StatusPill inherits Rectangle {
+    in property <string> label;
+    in property <color> tint;
+
+    height: 24px;
+    border-radius: 4px;
+    background: tint.transparentize(85%);
+
+    HorizontalLayout {
+        padding-left: 8px;
+        padding-right: 8px;
+        Text {
+            text: root.label;
+            color: root.tint;
+            font-weight: 700;
+            font-size: 12px;
+            vertical-alignment: center;
+        }
+    }
+}
+
+component Metric inherits HorizontalLayout {
+    in property <string> label;
+    in property <string> value;
+
+    spacing: 4px;
+    Text {
+        text: root.label;
+        color: Theme.text-faint;
+        vertical-alignment: center;
+    }
+    Text {
+        text: root.value;
+        color: Theme.text;
+        font-family: Theme.mono-font;
+        vertical-alignment: center;
+    }
+}
+
+component ResponseHeaders {
+    in property <[KeyValue]> headers;
+
+    ListView {
+        for header in root.headers: Rectangle {
+            height: 32px;
+            HorizontalLayout {
+                padding-left: 12px;
+                padding-right: 12px;
+                spacing: 12px;
+                Text {
+                    width: 35%;
+                    text: header.key;
+                    color: Theme.accent;
+                    font-family: Theme.mono-font;
+                    overflow: elide;
+                    vertical-alignment: center;
+                }
+                Text {
+                    text: header.value;
+                    color: Theme.text;
+                    font-family: Theme.mono-font;
+                    overflow: elide;
+                    vertical-alignment: center;
+                }
+            }
+            Rectangle {
+                y: parent.height - 1px;
+                height: 1px;
+                background: Theme.border;
+            }
+        }
+    }
+}
+
+component ResponsePanel inherits Rectangle {
+    in property <ResponseState> state;
+    in property <Response> response;
+    in property <string> error;
+
+    property <int> tab;
+
+    border-radius: Theme.radius;
+    border-width: 1px;
+    border-color: Theme.border;
+    background: Theme.panel;
+    clip: true;
+
+    VerticalLayout {
+        HorizontalLayout {
+            padding-right: 14px;
+            spacing: 16px;
+            TabBar {
+                horizontal-stretch: 1;
+                tabs: [
+                    { label: "Body" },
+                    {
+                        label: "Headers",
+                        count: root.state == ResponseState.received ? root.response.headers.length : 0,
+                        flag: "-i",
+                    },
+                ];
+                current <=> root.tab;
+            }
+            if root.state == ResponseState.received: HorizontalLayout {
+                spacing: 16px;
+                StatusPill {
+                    y: (parent.height - self.height) / 2;
+                    label: root.response.status-code + " " + root.response.status-text;
+                    tint: Theme.status-color(root.response.status-code);
+                }
+                Metric {
+                    label: "Time";
+                    value: root.response.elapsed;
+                }
+                Metric {
+                    label: "Size";
+                    value: root.response.size;
+                }
+                Metric {
+                    label: "Type";
+                    value: root.response.format;
+                }
+            }
+        }
+
+        if root.state == ResponseState.idle: EmptyState {
+            vertical-stretch: 1;
+            title: "No response yet";
+            hint: "Enter a URL and press Send (or Enter) to make a request.";
+        }
+
+        if root.state == ResponseState.sending: EmptyState {
+            vertical-stretch: 1;
+            title: "Sending request…";
+            hint: "Waiting for the server to respond.";
+        }
+
+        if root.state == ResponseState.failed: EmptyState {
+            vertical-stretch: 1;
+            title: "Request failed";
+            hint: root.error;
+        }
+
+        if root.state == ResponseState.received && root.tab == 0: VerticalLayout {
+            vertical-stretch: 1;
+            padding: 12px;
+            CodeView {
+                read-only: true;
+                text: root.response.body;
+            }
+        }
+
+        if root.state == ResponseState.received && root.tab == 1: ResponseHeaders {
+            vertical-stretch: 1;
+            headers: root.response.headers;
+        }
+    }
+}
+
+// Yaru-style round title bar button; `hover-background` lets close turn orange.
+component WindowControl {
+    in property <string> icon;
+    in property <color> hover-background: #ffffff26;
+    callback clicked();
+
+    width: 32px;
+
+    Rectangle {
+        width: 24px;
+        height: 24px;
+        border-radius: 12px;
+        background: touch.pressed ? root.hover-background.darker(15%)
+            : touch.has-hover ? root.hover-background : #ffffff14;
+
+        Path {
+            width: 8px;
+            height: 8px;
+            viewbox-width: 10;
+            viewbox-height: 10;
+            commands: root.icon;
+            stroke: Theme.text;
+            stroke-width: 1.5px;
+        }
+    }
+
+    touch := TouchArea {
+        clicked => {
+            root.clicked();
+        }
+    }
+}
+
+// "/" drawn between address segments, showing how they join into the URL.
+component PathSlash inherits Text {
+    text: "/";
+    color: Theme.text-faint;
+    font-family: Theme.mono-font;
+    vertical-alignment: center;
+}
+
+// Square icon button inside the address box that starts a new endpoint on the same base URL.
+component NewEndpointButton inherits Rectangle {
+    callback clicked();
+
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    background: Theme.success.transparentize(touch.has-hover ? 65% : 82%);
+
+    Path {
+        width: 12px;
+        height: 12px;
+        viewbox-width: 24;
+        viewbox-height: 24;
+        commands: Icons.plus;
+        stroke: Theme.success;
+        stroke-width: 2.5px;
+        stroke-line-cap: round;
+    }
+
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => {
+            root.clicked();
+        }
+    }
+}
+
+// Empty title bar space that moves the window when dragged and toggles maximize
+// when double-clicked.
+component DragRegion inherits WindowMoveArea {
+    callback double-clicked();
+
+    TouchArea {
+        double-clicked => {
+            root.double-clicked();
+        }
+    }
+}
+
+// Replaces the window manager's decorations (the window uses `no-frame`) and
+// hosts the request bar: method, URL and Send.
+component TitleBar inherits Rectangle {
+    in-out property <string> method;
+    in-out property <string> scheme;
+    in property <[string]> schemes;
+    in-out property <string> domain;
+    in-out property <string> version;
+    in-out property <string> endpoint;
+    in property <bool> sending;
+    callback send();
+    callback domain-edited(string);
+    callback new-endpoint();
+    callback minimize();
+    callback toggle-maximize();
+    callback close();
+    in property <[SettingsItem]> settings-items;
+    in property <string> app-version;
+    callback settings-activated(SettingsAction);
+
+    height: 46px;
+    background: Theme.titlebar;
+
+    HorizontalLayout {
+        padding-right: 8px;
+        // The request bar takes three quarters of the free width; the drag region
+        // after it keeps the rest so the window always has room to be grabbed.
+        HorizontalLayout {
+            horizontal-stretch: 6;
+            padding-left: 14px;
+            padding-top: 7px;
+            padding-bottom: 7px;
+            spacing: 8px;
+            Dropdown {
+                width: 136px;
+                flag: "-X";
+                options: ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"];
+                method-colors: true;
+                value <=> root.method;
+            }
+
+            // Base URL (scheme, domain, version) and endpoint, read left to right as one URL.
+            Rectangle {
+                horizontal-stretch: 1;
+                border-radius: Theme.radius;
+                border-width: 1px;
+                border-color: Theme.border-strong;
+                background: Theme.address-bar;
+
+                HorizontalLayout {
+                    padding-right: 2px;
+                    Dropdown {
+                        width: 96px;
+                        flat: true;
+                        mono: true;
+                        options: root.schemes;
+                        value <=> root.scheme;
+                    }
+                    Input {
+                        horizontal-stretch: 2;
+                        min-width: 120px;
+                        borderless: true;
+                        mono: true;
+                        placeholder: "api.example.com";
+                        text <=> root.domain;
+                        edited(text) => {
+                            root.domain-edited(text);
+                        }
+                        accepted => {
+                            root.send();
+                        }
+                    }
+                    PathSlash { }
+                    Input {
+                        width: 64px;
+                        borderless: true;
+                        mono: true;
+                        placeholder: "v1";
+                        text <=> root.version;
+                        accepted => {
+                            root.send();
+                        }
+                    }
+                    PathSlash { }
+                    endpoint-input := Input {
+                        horizontal-stretch: 3;
+                        min-width: 120px;
+                        borderless: true;
+                        mono: true;
+                        placeholder: "users/42";
+                        text <=> root.endpoint;
+                        accepted => {
+                            root.send();
+                        }
+                    }
+                    NewEndpointButton {
+                        y: (parent.height - self.height) / 2;
+                        clicked => {
+                            root.new-endpoint();
+                            endpoint-input.focus();
+                        }
+                    }
+                }
+            }
+
+            Button {
+                width: 96px;
+                text: root.sending ? "Sending…" : "Send";
+                primary: true;
+                clicked => {
+                    root.send();
+                }
+            }
+        }
+
+        DragRegion {
+            horizontal-stretch: 1;
+            min-width: 96px;
+            double-clicked => {
+                root.toggle-maximize();
+            }
+        }
+
+        SettingsButton {
+            items: root.settings-items;
+            app-version: root.app-version;
+            activated(action) => {
+                root.settings-activated(action);
+            }
+        }
+        Rectangle {
+            width: 12px;
+        }
+
+        WindowControl {
+            icon: "M 0 5 L 10 5";
+            clicked => {
+                root.minimize();
+            }
+        }
+        WindowControl {
+            icon: "M 0.5 0.5 L 9.5 0.5 L 9.5 9.5 L 0.5 9.5 Z";
+            clicked => {
+                root.toggle-maximize();
+            }
+        }
+        WindowControl {
+            icon: "M 0 0 L 10 10 M 10 0 L 0 10";
+            hover-background: Theme.accent;
+            clicked => {
+                root.close();
+            }
+        }
+    }
+
+    Rectangle {
+        y: parent.height - 1px;
+        height: 1px;
+        background: Theme.border;
+    }
+}
+
+// Right-hand panel showing the curl command equivalent to the current form,
+// kept in sync as the user edits. Read-only but selectable for copying.
+component CurlPreview inherits Rectangle {
+    in property <string> command;
+
+    background: Theme.sidebar;
+
+    VerticalLayout {
+        padding: 16px;
+        spacing: 10px;
+        VerticalLayout {
+            spacing: 4px;
+            SectionLabel {
+                text: "CURL";
+            }
+            Text {
+                text: "The same request as a curl command. Select and press Ctrl+C to copy.";
+                font-size: Theme.font-size-small;
+                color: Theme.text-faint;
+                wrap: word-wrap;
+            }
+        }
+        CodeView {
+            vertical-stretch: 1;
+            read-only: true;
+            text: root.command;
+        }
+    }
+}
+
+// Horizontal drag handle that resizes the panel above it.
+component Splitter inherits Rectangle {
+    callback dragged(length);
+
+    height: 12px;
+
+    Rectangle {
+        y: (parent.height - self.height) / 2;
+        width: 40px;
+        height: 4px;
+        border-radius: 2px;
+        background: touch.pressed ? Theme.accent : touch.has-hover ? Theme.border-strong : Theme.border;
+    }
+
+    touch := TouchArea {
+        mouse-cursor: row-resize;
+        moved => {
+            root.dragged(self.mouse-y - self.pressed-y);
+        }
+    }
+}
+
+export component AppWindow inherits Window {
+    in-out property <string> method: "GET";
+    in-out property <string> scheme;
+    in property <[string]> schemes;
+    in-out property <string> domain;
+    in-out property <string> version;
+    in-out property <string> endpoint;
+    in property <[KeyValue]> params;
+    in property <[KeyValue]> headers;
+    in-out property <string> body;
+    in-out property <int> body-type;
+    in-out property <int> body-source;
+    in-out property <string> body-file;
+    in property <[KeyValue]> urlencoded-fields;
+    in property <[KeyValue]> multipart-parts;
+    in-out property <int> auth-type;
+    in-out property <string> auth-token;
+    // Defaults are set from Rust, which also restores them on New Request.
+    in-out property <bool> follow-redirects;
+    in-out property <string> max-time;
+    out property <RequestDraft> draft: {
+        method: root.method,
+        scheme: root.scheme,
+        domain: root.domain,
+        version: root.version,
+        endpoint: root.endpoint,
+        params: root.params,
+        headers: root.headers,
+        body-type: root.body-type,
+        body-source: root.body-source,
+        body: root.body,
+        body-file: root.body-file,
+        urlencoded-fields: root.urlencoded-fields,
+        multipart-parts: root.multipart-parts,
+        auth-type: root.auth-type,
+        auth-token: root.auth-token,
+        follow-redirects: root.follow-redirects,
+        max-time: root.max-time,
+    };
+    // Re-evaluated whenever the draft changes, including edits inside the table rows.
+    pure callback curl-command(RequestDraft) -> string;
+
+    in-out property <ResponseState> response-state;
+    in property <string> app-version;
+    in property <Response> response;
+    in property <string> response-error;
+
+    in property <[HistoryEntry]> history;
+    in-out property <string> history-search;
+
+    callback send();
+    callback domain-edited(string);
+    callback new-endpoint();
+    callback new-request();
+    callback history-selected(int);
+    callback add-row(RowTable);
+    callback remove-row(RowTable, int);
+    callback row-edited(RowTable, int, KeyValue);
+    callback minimize();
+    callback toggle-maximize();
+
+    property <length> request-height: 320px;
+
+    title: "API Client";
+    no-frame: true;
+    resize-border-width: 6px;
+    preferred-width: 1360px;
+    preferred-height: 800px;
+    // Room for both side panels plus a usable request area.
+    min-width: 1080px;
+    min-height: 600px;
+    background: Theme.background;
+    default-font-size: Theme.font-size;
+    default-font-family: Theme.ui-font;
+    forward-focus: shortcuts;
+
+    // Shortcut labels here must match the KeyBindings below.
+    property <[SettingsItem]> settings-items: [
+        { action: SettingsAction.new-request, label: "New Request", icon: Icons.plus, shortcut: "Ctrl+N", enabled: true, group-start: true },
+        { action: SettingsAction.import-collection, label: "Import Collection", icon: Icons.download },
+        { action: SettingsAction.export-collection, label: "Export Collection", icon: Icons.upload },
+        {
+            action: SettingsAction.clear-response,
+            label: "Clear Response",
+            icon: Icons.clear,
+            enabled: root.response-state == ResponseState.received || root.response-state == ResponseState.failed,
+            group-start: true,
+        },
+        { action: SettingsAction.quit, label: "Quit", icon: Icons.log-out, shortcut: "Ctrl+Q", enabled: true, group-start: true },
+    ];
+
+    function run-settings-action(action: SettingsAction) {
+        if action == SettingsAction.new-request {
+            root.new-request();
+        } else if action == SettingsAction.clear-response {
+            root.response-state = ResponseState.idle;
+        } else if action == SettingsAction.quit {
+            root.close();
+        }
+    }
+
+    // Key events the focused input doesn't handle bubble up to here.
+    shortcuts := FocusScope {
+        KeyBinding {
+            keys: @keys(Control + N);
+            activated => {
+                root.new-request();
+            }
+        }
+        KeyBinding {
+            keys: @keys(Control + Q);
+            activated => {
+                root.close();
+            }
+        }
+
+        VerticalLayout {
+            TitleBar {
+                method <=> root.method;
+                scheme <=> root.scheme;
+                schemes: root.schemes;
+                domain <=> root.domain;
+                version <=> root.version;
+                endpoint <=> root.endpoint;
+                sending: root.response-state == ResponseState.sending;
+                send => {
+                    root.send();
+                }
+                domain-edited(text) => {
+                    root.domain-edited(text);
+                }
+                new-endpoint => {
+                    root.new-endpoint();
+                }
+                minimize => {
+                    root.minimize();
+                }
+                toggle-maximize => {
+                    root.toggle-maximize();
+                }
+                close => {
+                    root.close();
+                }
+                settings-items: root.settings-items;
+                app-version: root.app-version;
+                settings-activated(action) => {
+                    root.run-settings-action(action);
+                }
+            }
+
+            HorizontalLayout {
+                Sidebar {
+                    width: 260px;
+                    history: root.history;
+                    search <=> root.history-search;
+                    history-selected(index) => {
+                        root.history-selected(index);
+                    }
+                }
+
+                Rectangle {
+                    width: 1px;
+                    background: Theme.border;
+                }
+
+                VerticalLayout {
+                    padding: 16px;
+                    spacing: 4px;
+
+                    RequestPanel {
+                        height: root.request-height;
+                        params: root.params;
+                        headers: root.headers;
+                        body <=> root.body;
+                        body-type <=> root.body-type;
+                        body-source <=> root.body-source;
+                        body-file <=> root.body-file;
+                        auth-type <=> root.auth-type;
+                        auth-token <=> root.auth-token;
+                        follow-redirects <=> root.follow-redirects;
+                        max-time <=> root.max-time;
+                        urlencoded-fields: root.urlencoded-fields;
+                        multipart-parts: root.multipart-parts;
+                        add-row(table) => {
+                            root.add-row(table);
+                        }
+                        remove-row(table, index) => {
+                            root.remove-row(table, index);
+                        }
+                        row-edited(table, index, row) => {
+                            root.row-edited(table, index, row);
+                        }
+                    }
+
+                    Splitter {
+                        dragged(delta) => {
+                            root.request-height = max(160px, min(root.height - 300px, root.request-height + delta));
+                        }
+                    }
+
+                    ResponsePanel {
+                        vertical-stretch: 1;
+                        state: root.response-state;
+                        response: root.response;
+                        error: root.response-error;
+                    }
+                }
+
+                Rectangle {
+                    width: 1px;
+                    background: Theme.border;
+                }
+
+                CurlPreview {
+                    width: 320px;
+                    command: root.curl-command(root.draft);
+                }
+            }
+        }
+    }
+}
