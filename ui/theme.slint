@@ -34,30 +34,31 @@ struct Palette {
 export global Theme {
     in-out property <ThemeName> name: ThemeName.linux;
 
-    // The Linux console's 16-colour VGA palette: black background, #AAAAAA text.
-    // Surfaces stay black and are told apart by bright-black (#555555) borders;
-    // hover shades are #555555 at partial opacity. Method and status colours
-    // use the bright half of the palette, which stays legible on black.
+    // The Linux console's 16-colour VGA palette, combined the way console tools
+    // such as Midnight Commander use it: a blue (#0000AA) title bar and
+    // selection on black, cyan (#00AAAA) frames, a yellow (#FFFF55) accent with
+    // black text, and white / light-grey / dark-grey text for emphasis levels.
+    // POST and 4xx use brown (#AA5500) so they don't read as the accent.
     property <Palette> linux: {
         background: #000000,
-        titlebar: #000000,
+        titlebar: #0000aa,
         sidebar: #000000,
         panel: #000000,
         field: #000000,
         address-bar: #000000,
-        surface: #55555559,
-        surface-raised: #5555558c,
+        surface: #555555,
+        surface-raised: #5555ff,
         border: #555555,
-        border-strong: #555555,
-        text: #aaaaaa,
-        text-muted: #aaaaaab3,
+        border-strong: #00aaaa,
+        text: #ffffff,
+        text-muted: #aaaaaa,
         text-faint: #555555,
-        accent: #00aaaa,
-        accent-hover: #55ffff,
+        accent: #ffff55,
+        accent-hover: #ffffff,
         on-accent: #000000,
         selection: #0000aa,
         success: #55ff55,
-        warning: #ffff55,
+        warning: #aa5500,
         danger: #ff5555,
         info: #55ffff,
         blue: #5555ff,
