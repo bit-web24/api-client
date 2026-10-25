@@ -1,10 +1,10 @@
 import { ListView } from "std-widgets.slint";
-import { Theme } from "theme.slint";
+import { Theme, ThemeName } from "theme.slint";
 import { Button, CheckBox, EmptyState, Input, SectionLabel, TabBar, TabItem, Dropdown, FlagText, KeyValue, KeyValueEditor, CodeView } from "widgets.slint";
 import { RequestEntry, ServiceEntry, Sidebar } from "sidebar.slint";
 import { Icons, SettingsAction, SettingsButton, SettingsItem } from "settings_menu.slint";
 
-export { KeyValue }
+export { KeyValue, Theme, ThemeName }
 
 export enum ResponseState {
     idle,
@@ -957,6 +957,8 @@ export component AppWindow inherits Window {
     callback request-search-edited(string);
     callback select-request(int);
     callback select-service(int);
+    // Theme.name was changed from the settings menu; Rust saves the choice.
+    callback theme-changed();
     // Returns an error message, or "" when the service was created.
     callback create-service(string) -> string;
     callback add-row(RowTable);
@@ -982,6 +984,21 @@ export component AppWindow inherits Window {
 
     // Shortcut labels here must match the KeyBindings below.
     property <[SettingsItem]> settings-items: [
+        {
+            action: SettingsAction.theme-linux,
+            label: "Linux theme",
+            icon: Icons.terminal,
+            enabled: true,
+            group-start: true,
+            checked: Theme.name == ThemeName.linux,
+        },
+        {
+            action: SettingsAction.theme-yaru,
+            label: "Yaru theme",
+            icon: Icons.monitor,
+            enabled: true,
+            checked: Theme.name == ThemeName.yaru,
+        },
         { action: SettingsAction.import-collection, label: "Import Collection", icon: Icons.download, group-start: true },
         { action: SettingsAction.export-collection, label: "Export Collection", icon: Icons.upload },
         {
@@ -995,7 +1012,13 @@ export component AppWindow inherits Window {
     ];
 
     function run-settings-action(action: SettingsAction) {
-        if action == SettingsAction.clear-response {
+        if action == SettingsAction.theme-linux {
+            Theme.name = ThemeName.linux;
+            root.theme-changed();
+        } else if action == SettingsAction.theme-yaru {
+            Theme.name = ThemeName.yaru;
+            root.theme-changed();
+        } else if action == SettingsAction.clear-response {
             root.response-state = ResponseState.idle;
         } else if action == SettingsAction.quit {
             root.close();

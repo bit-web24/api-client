@@ -1,6 +1,8 @@
 import { Theme } from "theme.slint";
 
 export enum SettingsAction {
+    theme-linux,
+    theme-yaru,
     import-collection,
     export-collection,
     clear-response,
@@ -17,6 +19,8 @@ export struct SettingsItem {
     enabled: bool,
     // Draws a divider above the item, starting a new group.
     group-start: bool,
+    // Marks the active option of a choice, such as the current theme.
+    checked: bool,
 }
 
 // Outline icons from Lucide (https://lucide.dev, ISC licence).
@@ -27,6 +31,8 @@ export global Icons {
     out property <string> upload: "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4 M17 8l-5-5-5 5 M12 3v12";
     out property <string> clear: "M2 12a10 10 0 1 0 20 0a10 10 0 1 0 -20 0 M15 9l-6 6 M9 9l6 6";
     out property <string> log-out: "M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4 M16 17l5-5-5-5 M21 12H9";
+    out property <string> terminal: "M4 17l6-6-6-6 M12 19h8";
+    out property <string> monitor: "M4 3h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z M8 21h8 M12 17v4";
 }
 
 component Icon inherits Path {
@@ -70,7 +76,17 @@ component SettingsRow inherits Rectangle {
             font-weight: 500;
             vertical-alignment: center;
         }
-        if root.item.enabled: Text {
+        if root.item.checked: Path {
+            y: (parent.height - self.height) / 2;
+            width: 12px;
+            height: 10px;
+            viewbox-width: 12;
+            viewbox-height: 10;
+            commands: "M 1 5 L 4.5 8.5 L 11 1";
+            stroke: Theme.accent-hover;
+            stroke-width: 2px;
+        }
+        if root.item.enabled && !root.item.checked: Text {
             text: root.item.shortcut;
             color: root.highlighted ? Theme.accent-hover : Theme.text-faint;
             font-size: 12px;

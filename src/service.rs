@@ -1,7 +1,7 @@
 //! Services and their saved requests: what the sidebar lists and what is kept on
 //! disk. Pure data and operations; no UI types and no IO.
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 
 /// `--max-time` a new request starts with, in seconds.
 pub const DEFAULT_MAX_TIME_SECS: u64 = 30;
@@ -197,7 +197,27 @@ impl Service {
     }
 }
 
-/// All services, as saved on disk.
+/// The colour theme the app uses.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ThemeChoice {
+    #[default]
+    Linux,
+    Yaru,
+}
+
+impl<'de> Deserialize<'de> for ThemeChoice {
+    /// Reads a theme name; an unknown one (say, from a newer version) falls back
+    /// to the default instead of making the whole file unreadable.
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        Ok(match String::deserialize(deserializer)?.as_str() {
+            "yaru" => Self::Yaru,
+            _ => Self::Linux,
+        })
+    }
+}
+
+/// Everything the app keeps on disk: the services and the chosen theme.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Workspace {
@@ -205,6 +225,7 @@ pub struct Workspace {
     services: Vec<Service>,
     /// Always a valid index into `services`.
     active_service: usize,
+    pub theme: ThemeChoice,
 }
 
 impl Default for Workspace {
@@ -213,6 +234,7 @@ impl Default for Workspace {
         Self {
             services: vec![Service::default()],
             active_service: 0,
+            theme: ThemeChoice::default(),
         }
     }
 }
@@ -445,6 +467,16 @@ mod tests {
         assert_eq!(matching_requests(&requests, "USERS"), [0, 2]);
         assert_eq!(matching_requests(&requests, "post"), [1]);
         assert_eq!(matching_requests(&requests, "nothing"), Vec::<usize>::new());
+    }
+
+    #[test]
+    fn theme_defaults_to_linux_and_survives_unknown_names() {
+        assert_eq!(Workspace::default().theme, ThemeChoice::Linux);
+        let yaru = Workspace::from_json(r#"{"theme":"yaru"}"#).unwrap();
+        assert_eq!(yaru.theme, ThemeChoice::Yaru);
+        let unknown = Workspace::from_json(r#"{"theme":"solarized"}"#).unwrap();
+        assert_eq!(unknown.theme, ThemeChoice::Linux);
+        assert!(yaru.to_json().unwrap().contains(r#""theme": "yaru""#));
     }
 
     #[test]

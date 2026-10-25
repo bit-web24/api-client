@@ -9,11 +9,11 @@ use std::rc::Rc;
 
 use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
 
-use crate::service::{Row, SavedRequest, Service, Workspace, matching_requests};
+use crate::service::{Row, SavedRequest, Service, ThemeChoice, Workspace, matching_requests};
 use crate::store::{self, Loaded};
 use crate::{
     AppWindow, KeyValue, RequestDraft, RequestEntry, ResponseState, RowTable, ServiceEntry, Tables,
-    curl_text, show_error,
+    Theme, ThemeName, curl_text, show_error,
 };
 
 /// The services and where they are saved, shared by the UI callbacks.
@@ -37,6 +37,8 @@ impl Services {
             tables,
         });
         services.show(ui);
+        ui.global::<Theme>()
+            .set_name(theme_name(services.workspace.borrow().theme));
         if let Some(problem) = problem {
             show_error(ui, problem);
         }
@@ -207,6 +209,19 @@ pub fn wire(ui: &AppWindow, services: &Rc<Services>) {
             }
         }
     });
+    ui.on_theme_changed({
+        let ui_weak = ui.as_weak();
+        let services = services.clone();
+        move || {
+            let Some(ui) = ui_weak.upgrade() else {
+                return;
+            };
+            services.workspace.borrow_mut().theme = theme_choice(ui.global::<Theme>().get_name());
+            if let Err(message) = services.save() {
+                show_error(&ui, message);
+            }
+        }
+    });
     ui.on_request_search_edited({
         let ui_weak = ui.as_weak();
         let services = services.clone();
@@ -216,6 +231,22 @@ pub fn wire(ui: &AppWindow, services: &Rc<Services>) {
             }
         }
     });
+}
+
+/// Maps the saved theme to the UI's theme.
+fn theme_name(choice: ThemeChoice) -> ThemeName {
+    match choice {
+        ThemeChoice::Linux => ThemeName::Linux,
+        ThemeChoice::Yaru => ThemeName::Yaru,
+    }
+}
+
+/// Maps the UI's theme to the one saved.
+fn theme_choice(name: ThemeName) -> ThemeChoice {
+    match name {
+        ThemeName::Linux => ThemeChoice::Linux,
+        ThemeName::Yaru => ThemeChoice::Yaru,
+    }
 }
 
 /// Loads the workspace from the config directory.

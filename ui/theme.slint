@@ -1,36 +1,128 @@
-// Ubuntu Yaru (dark). Base colours are taken from the installed Yaru-dark GTK 4
-// theme: headerbar #222222, window #2c2c2c, views #272727, borders #131313,
-// accent Ubuntu orange #E95420. The method/status hues come from Yaru's accent
-// variants (blue, purple, red, olive, prussian green) lightened so they stay
-// legible as text on dark surfaces.
+export enum ThemeName {
+    linux,
+    yaru,
+}
+
+// Every colour a theme defines. Components never read a palette directly; they
+// use the `Theme` tokens below, which follow the selected palette.
+struct Palette {
+    background: color,
+    titlebar: color,
+    sidebar: color,
+    panel: color,
+    field: color,
+    address-bar: color,
+    surface: color,
+    surface-raised: color,
+    border: color,
+    border-strong: color,
+    text: color,
+    text-muted: color,
+    text-faint: color,
+    accent: color,
+    accent-hover: color,
+    on-accent: color,
+    selection: color,
+    success: color,
+    warning: color,
+    danger: color,
+    info: color,
+    blue: color,
+    purple: color,
+}
+
 export global Theme {
-    out property <color> background: #2c2c2c;
-    out property <color> titlebar: #222222;
-    out property <color> sidebar: #222222;
-    out property <color> panel: #272727;
-    out property <color> field: #1d1d1d;
-    // Yaru's text-view black; the base-URL box sits on it to read as one unit.
-    out property <color> address-bar: #181818;
-    out property <color> surface: #333333;
-    out property <color> surface-raised: #3c3c3c;
-    out property <color> border: #1b1b1b;
-    out property <color> border-strong: #131313;
+    in-out property <ThemeName> name: ThemeName.linux;
 
-    out property <color> text: #f7f7f7;
-    out property <color> text-muted: #ffffffb3;
-    out property <color> text-faint: #ffffff80;
+    // The Linux console's 16-colour VGA palette: black background, #AAAAAA text.
+    // Surfaces stay black and are told apart by bright-black (#555555) borders;
+    // hover shades are #555555 at partial opacity. Method and status colours
+    // use the bright half of the palette, which stays legible on black.
+    property <Palette> linux: {
+        background: #000000,
+        titlebar: #000000,
+        sidebar: #000000,
+        panel: #000000,
+        field: #000000,
+        address-bar: #000000,
+        surface: #55555559,
+        surface-raised: #5555558c,
+        border: #555555,
+        border-strong: #555555,
+        text: #aaaaaa,
+        text-muted: #aaaaaab3,
+        text-faint: #555555,
+        accent: #00aaaa,
+        accent-hover: #55ffff,
+        on-accent: #000000,
+        selection: #0000aa,
+        success: #55ff55,
+        warning: #ffff55,
+        danger: #ff5555,
+        info: #55ffff,
+        blue: #5555ff,
+        purple: #ff55ff,
+    };
 
-    out property <color> accent: #e95420;
-    out property <color> accent-hover: #ec6d40;
-    out property <color> on-accent: #ffffff;
-    out property <color> selection: #e9542066;
+    // Ubuntu Yaru (dark). Base colours are taken from the installed Yaru-dark GTK 4
+    // theme: headerbar #222222, window #2c2c2c, views #272727, borders #131313,
+    // accent Ubuntu orange #E95420. The method/status hues come from Yaru's accent
+    // variants lightened so they stay legible as text on dark surfaces.
+    property <Palette> yaru: {
+        background: #2c2c2c,
+        titlebar: #222222,
+        sidebar: #222222,
+        panel: #272727,
+        field: #1d1d1d,
+        address-bar: #181818,
+        surface: #333333,
+        surface-raised: #3c3c3c,
+        border: #1b1b1b,
+        border-strong: #131313,
+        text: #f7f7f7,
+        text-muted: #ffffffb3,
+        text-faint: #ffffff80,
+        accent: #e95420,
+        accent-hover: #ec6d40,
+        on-accent: #ffffff,
+        selection: #e9542066,
+        success: #6cc24a,
+        warning: #f99b11,
+        danger: #f0607a,
+        info: #4fb3b7,
+        blue: #4c9df5,
+        purple: #a496ec,
+    };
 
-    out property <color> success: #6cc24a;
-    out property <color> warning: #f99b11;
-    out property <color> danger: #f0607a;
-    out property <color> info: #4fb3b7;
-    out property <color> blue: #4c9df5;
-    out property <color> purple: #a496ec;
+    property <Palette> palette: name == ThemeName.yaru ? yaru : linux;
+
+    out property <color> background: palette.background;
+    out property <color> titlebar: palette.titlebar;
+    out property <color> sidebar: palette.sidebar;
+    out property <color> panel: palette.panel;
+    out property <color> field: palette.field;
+    // The base-URL box sits on this to read as one unit.
+    out property <color> address-bar: palette.address-bar;
+    out property <color> surface: palette.surface;
+    out property <color> surface-raised: palette.surface-raised;
+    out property <color> border: palette.border;
+    out property <color> border-strong: palette.border-strong;
+
+    out property <color> text: palette.text;
+    out property <color> text-muted: palette.text-muted;
+    out property <color> text-faint: palette.text-faint;
+
+    out property <color> accent: palette.accent;
+    out property <color> accent-hover: palette.accent-hover;
+    out property <color> on-accent: palette.on-accent;
+    out property <color> selection: palette.selection;
+
+    out property <color> success: palette.success;
+    out property <color> warning: palette.warning;
+    out property <color> danger: palette.danger;
+    out property <color> info: palette.info;
+    out property <color> blue: palette.blue;
+    out property <color> purple: palette.purple;
 
     out property <length> radius: 6px;
     out property <length> font-size: 13px;
