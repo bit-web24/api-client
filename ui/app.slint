@@ -1069,8 +1069,7 @@ export component AppWindow inherits Window {
 
     // Shortcut labels here must match the KeyBindings below.
     property <[SettingsItem]> settings-items: [
-        { action: SettingsAction.new-request, label: "New Request", icon: Icons.plus, shortcut: "Ctrl+N", enabled: true, group-start: true },
-        { action: SettingsAction.import-collection, label: "Import Collection", icon: Icons.download },
+        { action: SettingsAction.import-collection, label: "Import Collection", icon: Icons.download, group-start: true },
         { action: SettingsAction.export-collection, label: "Export Collection", icon: Icons.upload },
         {
             action: SettingsAction.clear-response,
@@ -1083,9 +1082,7 @@ export component AppWindow inherits Window {
     ];
 
     function run-settings-action(action: SettingsAction) {
-        if action == SettingsAction.new-request {
-            root.new-request();
-        } else if action == SettingsAction.clear-response {
+        if action == SettingsAction.clear-response {
             root.response-state = ResponseState.idle;
         } else if action == SettingsAction.quit {
             root.close();
