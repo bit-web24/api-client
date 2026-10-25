@@ -1,0 +1,365 @@
+import { ListView } from "std-widgets.slint";
+import { Theme } from "theme.slint";
+import { Button, EmptyState, Input, SectionLabel } from "widgets.slint";
+
+// A saved request as the sidebar lists it.
+export struct RequestEntry {
+    method: string,
+    title: string,
+    // Position in the service's requests; stays right when the list is filtered.
+    index: int,
+}
+
+export struct ServiceEntry {
+    name: string,
+    base-url: string,
+}
+
+// Rounded square marking the box as an API service.
+component ServiceBadge inherits Rectangle {
+    width: 28px;
+    height: 28px;
+    border-radius: 7px;
+    background: Theme.accent.transparentize(80%);
+    Text {
+        text: "{}";
+        font-family: Theme.mono-font;
+        font-weight: 800;
+        font-size: 11px;
+        color: Theme.accent-hover;
+    }
+}
+
+// Bottom-left box showing the current service; opens a list to switch services
+// or create a new one.
+component ServiceSwitcher inherits Rectangle {
+    in property <string> name;
+    in property <string> base-url;
+    in property <[ServiceEntry]> services;
+    in property <int> active-service;
+    callback select-service(int);
+    // Returns an error message, or "" when the service was created.
+    callback create-service(string) -> string;
+
+    property <bool> creating;
+    property <string> new-name;
+    property <string> create-error;
+
+    function create() {
+        root.create-error = root.create-service(root.new-name);
+        if root.create-error == "" {
+            root.new-name = "";
+            root.creating = false;
+            popup.close();
+        }
+    }
+
+    height: 56px;
+    border-radius: Theme.radius;
+    border-width: 1px;
+    border-color: Theme.border-strong;
+    background: touch.has-hover ? Theme.surface : Theme.panel;
+
+    HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 12px;
+        spacing: 10px;
+        ServiceBadge {
+            y: (parent.height - self.height) / 2;
+        }
+        VerticalLayout {
+            horizontal-stretch: 1;
+            alignment: center;
+            spacing: 2px;
+            Text {
+                text: root.name;
+                color: Theme.text;
+                font-weight: 600;
+                overflow: elide;
+            }
+            Text {
+                text: root.base-url;
+                font-family: Theme.mono-font;
+                font-size: Theme.font-size-small;
+                color: Theme.text-faint;
+                overflow: elide;
+            }
+        }
+        // Up-pointing chevron: the list opens above the box.
+        Path {
+            y: (parent.height - self.height) / 2;
+            width: 9px;
+            height: 5px;
+            viewbox-width: 9;
+            viewbox-height: 5;
+            commands: "M 0.5 4.5 L 4.5 0.5 L 8.5 4.5";
+            stroke: Theme.text-muted;
+            stroke-width: 1.5px;
+        }
+    }
+
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => {
+            root.creating = false;
+            root.create-error = "";
+            popup.show();
+        }
+    }
+
+    popup := PopupWindow {
+        // Typing a name must not dismiss the list, so it only closes on outside clicks.
+        close-policy: close-on-click-outside;
+        x: 0;
+        y: -self.height - 8px;
+        width: root.width;
+
+        Rectangle {
+            border-radius: 12px;
+            border-width: 1px;
+            border-color: #ffffff14;
+            background: Theme.background;
+            drop-shadow-blur: 24px;
+            drop-shadow-offset-y: 8px;
+            drop-shadow-color: #00000099;
+
+            VerticalLayout {
+                padding: 6px;
+                spacing: 2px;
+
+                Text {
+                    text: "SERVICES";
+                    font-size: Theme.font-size-small;
+                    font-weight: 600;
+                    letter-spacing: 0.8px;
+                    color: Theme.text-faint;
+                    horizontal-alignment: left;
+                    x: 8px;
+                    height: 26px;
+                    vertical-alignment: center;
+                }
+
+                for service[index] in root.services: Rectangle {
+                    height: 44px;
+                    border-radius: 8px;
+                    background: index == root.active-service
+                        ? Theme.selection
+                        : (row-touch.has-hover ? Theme.surface : transparent);
+                    HorizontalLayout {
+                        padding-left: 8px;
+                        padding-right: 10px;
+                        spacing: 8px;
+                        VerticalLayout {
+                            horizontal-stretch: 1;
+                            alignment: center;
+                            spacing: 1px;
+                            Text {
+                                text: service.name;
+                                color: Theme.text;
+                                font-weight: index == root.active-service ? 600 : 400;
+                                overflow: elide;
+                            }
+                            Text {
+                                text: service.base-url;
+                                font-family: Theme.mono-font;
+                                font-size: Theme.font-size-small;
+                                color: Theme.text-faint;
+                                overflow: elide;
+                            }
+                        }
+                        if index == root.active-service: Path {
+                            y: (parent.height - self.height) / 2;
+                            width: 12px;
+                            height: 10px;
+                            viewbox-width: 12;
+                            viewbox-height: 10;
+                            commands: "M 1 5 L 4.5 8.5 L 11 1";
+                            stroke: Theme.accent-hover;
+                            stroke-width: 2px;
+                        }
+                    }
+                    row-touch := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => {
+                            popup.close();
+                            root.select-service(index);
+                        }
+                    }
+                }
+
+                Rectangle {
+                    height: 9px;
+                    Rectangle {
+                        y: 4px;
+                        height: 1px;
+                        background: #ffffff1a;
+                    }
+                }
+
+                if !root.creating: Rectangle {
+                    height: 36px;
+                    border-radius: 8px;
+                    background: new-touch.has-hover ? Theme.accent.transparentize(85%) : transparent;
+                    HorizontalLayout {
+                        padding-left: 8px;
+                        Text {
+                            text: "+  New service";
+                            color: new-touch.has-hover ? Theme.accent-hover : Theme.text;
+                            vertical-alignment: center;
+                        }
+                    }
+                    new-touch := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => {
+                            root.creating = true;
+                        }
+                    }
+                }
+
+                if root.creating: VerticalLayout {
+                    padding: 4px;
+                    spacing: 6px;
+                    HorizontalLayout {
+                        spacing: 6px;
+                        Input {
+                            horizontal-stretch: 1;
+                            placeholder: "Service name";
+                            text <=> root.new-name;
+                            init => {
+                                self.focus();
+                            }
+                            accepted => {
+                                root.create();
+                            }
+                        }
+                        Button {
+                            text: "Create";
+                            primary: true;
+                            clicked => {
+                                root.create();
+                            }
+                        }
+                    }
+                    if root.create-error != "": Text {
+                        text: root.create-error;
+                        color: Theme.danger;
+                        font-size: Theme.font-size-small;
+                        wrap: word-wrap;
+                    }
+                }
+            }
+        }
+    }
+}
+
+// Left column: the current service's requests, and the service switcher below.
+export component Sidebar inherits Rectangle {
+    in property <[RequestEntry]> requests;
+    in property <int> active-request;
+    in-out property <string> search;
+    in property <string> service-name;
+    in property <string> service-base-url;
+    in property <[ServiceEntry]> services;
+    in property <int> active-service;
+    callback search-edited(string);
+    callback select-request(int);
+    callback new-request();
+    callback select-service(int);
+    callback create-service(string) -> string;
+
+    background: Theme.sidebar;
+
+    VerticalLayout {
+        padding: 16px;
+        spacing: 12px;
+
+        Input {
+            placeholder: "Search requests";
+            text <=> root.search;
+            edited(text) => {
+                root.search-edited(text);
+            }
+        }
+
+        HorizontalLayout {
+            SectionLabel {
+                horizontal-stretch: 1;
+                text: "REQUESTS";
+                vertical-alignment: center;
+            }
+            Rectangle {
+                width: 22px;
+                height: 22px;
+                border-radius: 5px;
+                background: add-touch.has-hover ? Theme.success.transparentize(65%) : Theme.success.transparentize(82%);
+                Text {
+                    text: "+";
+                    color: Theme.success;
+                    font-weight: 700;
+                }
+                add-touch := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => {
+                        root.new-request();
+                    }
+                }
+            }
+        }
+
+        if root.requests.length == 0: EmptyState {
+            vertical-stretch: 1;
+            title: "No matching requests";
+            hint: "Try another search.";
+        }
+
+        if root.requests.length > 0: ListView {
+            vertical-stretch: 1;
+            for entry in root.requests: Rectangle {
+                height: 34px;
+                border-radius: 6px;
+                background: entry.index == root.active-request
+                    ? Theme.selection
+                    : (row-touch.has-hover ? Theme.surface : transparent);
+                HorizontalLayout {
+                    padding-left: 8px;
+                    padding-right: 8px;
+                    spacing: 8px;
+                    Text {
+                        width: 52px;
+                        text: entry.method;
+                        font-size: Theme.font-size-small;
+                        font-weight: 700;
+                        color: Theme.method-color(entry.method);
+                        vertical-alignment: center;
+                    }
+                    Text {
+                        text: entry.title;
+                        font-family: Theme.mono-font;
+                        color: entry.index == root.active-request ? Theme.text : Theme.text-muted;
+                        overflow: elide;
+                        vertical-alignment: center;
+                    }
+                }
+                row-touch := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => {
+                        root.select-request(entry.index);
+                    }
+                }
+            }
+        }
+
+        ServiceSwitcher {
+            name: root.service-name;
+            base-url: root.service-base-url;
+            services: root.services;
+            active-service: root.active-service;
+            select-service(index) => {
+                root.select-service(index);
+            }
+            create-service(name) => {
+                return root.create-service(name);
+            }
+        }
+    }
+}

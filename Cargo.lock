@@ -216,6 +216,7 @@ name = "api-client"
 version = "0.1.0"
 dependencies = [
  "percent-encoding",
+ "serde",
  "serde_json",
  "slint",
  "slint-build",

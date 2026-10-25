@@ -1,6 +1,7 @@
 import { ListView } from "std-widgets.slint";
 import { Theme } from "theme.slint";
-import { Button, CheckBox, Input, TabBar, TabItem, Dropdown, FlagText, KeyValue, KeyValueEditor, CodeView } from "widgets.slint";
+import { Button, CheckBox, EmptyState, Input, SectionLabel, TabBar, TabItem, Dropdown, FlagText, KeyValue, KeyValueEditor, CodeView } from "widgets.slint";
+import { RequestEntry, ServiceEntry, Sidebar } from "sidebar.slint";
 import { Icons, SettingsAction, SettingsButton, SettingsItem } from "settings_menu.slint";
 
 export { KeyValue }
@@ -48,11 +49,6 @@ export struct RequestDraft {
     max-time: string,
 }
 
-export struct HistoryEntry {
-    method: string,
-    url: string,
-}
-
 export struct Response {
     status-code: int,
     status-text: string,
@@ -91,98 +87,6 @@ component Segmented {
                 mouse-cursor: pointer;
                 clicked => {
                     root.current = index;
-                }
-            }
-        }
-    }
-}
-
-component SectionLabel inherits Text {
-    font-size: Theme.font-size-small;
-    font-weight: 600;
-    letter-spacing: 0.8px;
-    color: Theme.text-faint;
-}
-
-component EmptyState {
-    in property <string> title;
-    in property <string> hint;
-
-    VerticalLayout {
-        alignment: center;
-        spacing: 6px;
-        Text {
-            text: root.title;
-            color: Theme.text-muted;
-            font-size: 14px;
-            font-weight: 600;
-            horizontal-alignment: center;
-        }
-        Text {
-            text: root.hint;
-            color: Theme.text-faint;
-            horizontal-alignment: center;
-            wrap: word-wrap;
-        }
-    }
-}
-
-component Sidebar inherits Rectangle {
-    in property <[HistoryEntry]> history;
-    in-out property <string> search;
-    callback history-selected(int);
-
-    background: Theme.sidebar;
-
-    VerticalLayout {
-        padding: 16px;
-        spacing: 14px;
-
-        Input {
-            placeholder: "Search history";
-            text <=> root.search;
-        }
-
-        SectionLabel {
-            text: "HISTORY";
-        }
-
-        if root.history.length == 0: EmptyState {
-            vertical-stretch: 1;
-            title: "No requests yet";
-            hint: "Requests you send will show up here.";
-        }
-
-        if root.history.length > 0: ListView {
-            vertical-stretch: 1;
-            for entry[index] in root.history: Rectangle {
-                height: 34px;
-                border-radius: 4px;
-                background: touch.has-hover ? Theme.surface : transparent;
-                HorizontalLayout {
-                    padding-left: 8px;
-                    padding-right: 8px;
-                    spacing: 8px;
-                    Text {
-                        width: 52px;
-                        text: entry.method;
-                        font-size: Theme.font-size-small;
-                        font-weight: 700;
-                        color: Theme.method-color(entry.method);
-                        vertical-alignment: center;
-                    }
-                    Text {
-                        text: entry.url;
-                        color: Theme.text-muted;
-                        overflow: elide;
-                        vertical-alignment: center;
-                    }
-                }
-                touch := TouchArea {
-                    mouse-cursor: pointer;
-                    clicked => {
-                        root.history-selected(index);
-                    }
                 }
             }
         }
@@ -1038,14 +942,23 @@ export component AppWindow inherits Window {
     in property <Response> response;
     in property <string> response-error;
 
-    in property <[HistoryEntry]> history;
-    in-out property <string> history-search;
+    in property <[RequestEntry]> requests;
+    in property <int> active-request;
+    in-out property <string> request-search;
+    in property <string> service-name;
+    in property <string> service-base-url;
+    in property <[ServiceEntry]> services;
+    in property <int> active-service;
 
     callback send();
     callback domain-edited(string);
     callback new-endpoint();
     callback new-request();
-    callback history-selected(int);
+    callback request-search-edited(string);
+    callback select-request(int);
+    callback select-service(int);
+    // Returns an error message, or "" when the service was created.
+    callback create-service(string) -> string;
     callback add-row(RowTable);
     callback remove-row(RowTable, int);
     callback row-edited(RowTable, int, KeyValue);
@@ -1141,10 +1054,27 @@ export component AppWindow inherits Window {
             HorizontalLayout {
                 Sidebar {
                     width: 260px;
-                    history: root.history;
-                    search <=> root.history-search;
-                    history-selected(index) => {
-                        root.history-selected(index);
+                    requests: root.requests;
+                    active-request: root.active-request;
+                    search <=> root.request-search;
+                    service-name: root.service-name;
+                    service-base-url: root.service-base-url;
+                    services: root.services;
+                    active-service: root.active-service;
+                    search-edited(text) => {
+                        root.request-search-edited(text);
+                    }
+                    select-request(index) => {
+                        root.select-request(index);
+                    }
+                    new-request => {
+                        root.new-endpoint();
+                    }
+                    select-service(index) => {
+                        root.select-service(index);
+                    }
+                    create-service(name) => {
+                        return root.create-service(name);
                     }
                 }
 

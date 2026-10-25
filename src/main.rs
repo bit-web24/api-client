@@ -3,13 +3,17 @@
 //! The UI lives in `ui/*.slint` and mirrors curl's options. This file only wires
 //! it up: [`draft`] reads the form, [`request`] builds what to send, [`curl`]
 //! renders the same request as a curl command, [`http`] sends it, and
-//! [`response`] formats what came back.
+//! [`response`] formats what came back. Requests are grouped into services
+//! ([`service`]), kept on disk by [`store`] and shown by [`services_ui`].
 
 mod curl;
 mod draft;
 mod http;
 mod request;
 mod response;
+mod service;
+mod services_ui;
+mod store;
 
 use std::rc::Rc;
 
@@ -18,17 +22,12 @@ use slint::{Model, ModelRc, SharedString, VecModel};
 use crate::draft::form_from_draft;
 use crate::http::{Reply, SendError};
 use crate::response::{BodyFormat, format_elapsed, format_size, render_body};
+use crate::services_ui::Services;
 
 slint::include_modules!();
 
-/// `--max-time` a new request starts with, in seconds.
-const DEFAULT_MAX_TIME_SECS: u64 = 30;
-
 /// URL schemes offered by the scheme chooser, in display order.
 const SCHEMES: [&str; 2] = ["http://", "https://"];
-
-/// Scheme preselected for new requests.
-const DEFAULT_SCHEME: &str = "https://";
 
 /// Splits `url` into one of [`SCHEMES`] (matched case-insensitively) and the rest.
 ///
@@ -96,13 +95,6 @@ impl Tables {
             RowTable::MultipartParts => &self.multipart_parts,
         }
     }
-
-    /// Clears `tables` back to a single blank row each.
-    fn reset(&self, tables: &[RowTable]) {
-        for &table in tables {
-            self.get(table).set_vec(vec![blank_row()]);
-        }
-    }
 }
 
 /// Connects the add, remove and edit actions of every key/value table.
@@ -166,7 +158,6 @@ fn wire_window_controls(ui: &AppWindow) {
 fn wire_url(ui: &AppWindow) {
     let schemes: Vec<SharedString> = SCHEMES.into_iter().map(SharedString::from).collect();
     ui.set_schemes(ModelRc::new(VecModel::from(schemes)));
-    ui.set_scheme(DEFAULT_SCHEME.into());
     ui.on_domain_edited({
         let ui = ui.as_weak();
         move |text| {
@@ -191,12 +182,6 @@ fn wire_curl_preview(ui: &AppWindow) {
         Ok(form) => curl::command(&form).into(),
         Err(message) => format!("# {message}").into(),
     });
-}
-
-/// Sets the Options tab to what curl does without `-L`/`--max-time` overrides in this app.
-fn apply_default_options(ui: &AppWindow) {
-    ui.set_follow_redirects(true);
-    ui.set_max_time(DEFAULT_MAX_TIME_SECS.to_string().into());
 }
 
 /// Converts a reply into what the response panel displays.
@@ -239,12 +224,13 @@ fn show_result(ui: &AppWindow, result: Result<Reply, SendError>) {
     }
 }
 
-/// Sends the composed request on Send or Enter.
+/// Sends the composed request on Send or Enter, saving it to its service first.
 ///
 /// The network call runs on a worker thread so the window stays responsive;
 /// its result is applied back on the UI thread.
-fn wire_send(ui: &AppWindow) {
+fn wire_send(ui: &AppWindow, services: &Rc<Services>) {
     let ui_weak = ui.as_weak();
+    let services = services.clone();
     ui.on_send(move || {
         let Some(ui) = ui_weak.upgrade() else {
             return;
@@ -253,6 +239,7 @@ fn wire_send(ui: &AppWindow) {
         if ui.get_response_state() == ResponseState::Sending {
             return;
         }
+        services.commit(&ui);
         let draft = ui.get_draft();
         if draft.domain.trim().is_empty() {
             return show_error(&ui, "Enter a domain to send the request to.".into());
@@ -275,56 +262,6 @@ fn wire_send(ui: &AppWindow) {
     });
 }
 
-/// Wires the two ways to start over: New Request clears everything, while the
-/// endpoint's "+" keeps the base URL (scheme, domain, version), method, headers
-/// and auth, and clears only what belongs to one endpoint.
-fn wire_reset(ui: &AppWindow, tables: &Rc<Tables>) {
-    let endpoint_tables = [
-        RowTable::Params,
-        RowTable::UrlencodedFields,
-        RowTable::MultipartParts,
-    ];
-    ui.on_new_endpoint({
-        let ui = ui.as_weak();
-        let tables = tables.clone();
-        move || {
-            tables.reset(&endpoint_tables);
-            if let Some(ui) = ui.upgrade() {
-                ui.set_endpoint("".into());
-                ui.set_body("".into());
-                ui.set_body_source(0);
-                ui.set_body_file("".into());
-                ui.set_response_state(ResponseState::Idle);
-            }
-        }
-    });
-    ui.on_new_request({
-        let ui = ui.as_weak();
-        let tables = tables.clone();
-        move || {
-            tables.reset(&endpoint_tables);
-            tables.reset(&[RowTable::Headers]);
-            if let Some(ui) = ui.upgrade() {
-                ui.set_method("GET".into());
-                ui.set_scheme(DEFAULT_SCHEME.into());
-                ui.set_domain("".into());
-                ui.set_version("".into());
-                ui.set_endpoint("".into());
-                ui.set_body("".into());
-                ui.set_body_source(0);
-                ui.set_body_file("".into());
-                ui.set_body_type(0);
-                ui.set_auth_type(0);
-                ui.set_auth_token("".into());
-                ui.set_auth_token_source(0);
-                ui.set_auth_token_env("".into());
-                apply_default_options(&ui);
-                ui.set_response_state(ResponseState::Idle);
-            }
-        }
-    });
-}
-
 /// Opens the main window and runs the event loop until it is closed.
 ///
 /// # Errors
@@ -338,12 +275,17 @@ fn main() -> Result<(), slint::PlatformError> {
 
     let tables = Tables::attach(&ui);
     wire_tables(&ui, &tables);
-    apply_default_options(&ui);
-    wire_send(&ui);
+    let services = Services::open(&ui, tables);
+    services_ui::wire(&ui, &services);
+    wire_send(&ui, &services);
     wire_curl_preview(&ui);
-    wire_reset(&ui, &tables);
 
-    ui.run()
+    ui.run()?;
+    if let Err(message) = services.save_on_exit(&ui) {
+        // The window is gone, so stderr is the only place left to report this.
+        eprintln!("{message}");
+    }
+    Ok(())
 }
 
 #[cfg(test)]

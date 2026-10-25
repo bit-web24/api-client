@@ -473,3 +473,34 @@ export component CodeView inherits Rectangle {
         font-family: Theme.mono-font;
     }
 }
+
+export component SectionLabel inherits Text {
+    font-size: Theme.font-size-small;
+    font-weight: 600;
+    letter-spacing: 0.8px;
+    color: Theme.text-faint;
+}
+
+
+export component EmptyState {
+    in property <string> title;
+    in property <string> hint;
+
+    VerticalLayout {
+        alignment: center;
+        spacing: 6px;
+        Text {
+            text: root.title;
+            color: Theme.text-muted;
+            font-size: 14px;
+            font-weight: 600;
+            horizontal-alignment: center;
+        }
+        Text {
+            text: root.hint;
+            color: Theme.text-faint;
+            horizontal-alignment: center;
+            wrap: word-wrap;
+        }
+    }
+}
