@@ -869,6 +869,64 @@ component CurlPreview inherits Rectangle {
     }
 }
 
+// Modal card asking to restart so a newly chosen theme takes effect.
+component RestartPrompt inherits Rectangle {
+    in property <string> theme-label;
+    callback later();
+    callback restart();
+
+    background: #00000099;
+
+    // Swallows clicks so the app behind stays untouched while the prompt is open.
+    TouchArea { }
+
+    Rectangle {
+        width: 380px;
+        height: card.preferred-height;
+        border-radius: 12px;
+        border-width: 1px;
+        border-color: Theme.border-strong;
+        background: Theme.panel;
+        drop-shadow-blur: 24px;
+        drop-shadow-color: #000000aa;
+
+        card := VerticalLayout {
+            padding: 20px;
+            spacing: 10px;
+            Text {
+                text: "Restart to apply the " + root.theme-label + " theme";
+                font-size: 15px;
+                font-weight: 700;
+                color: Theme.text;
+                wrap: word-wrap;
+            }
+            Text {
+                text: "Your choice is saved. Themes are applied when the app starts; your services and requests are saved before restarting.";
+                color: Theme.text-muted;
+                wrap: word-wrap;
+            }
+            HorizontalLayout {
+                padding-top: 8px;
+                alignment: end;
+                spacing: 8px;
+                Button {
+                    text: "Later";
+                    clicked => {
+                        root.later();
+                    }
+                }
+                Button {
+                    text: "Restart now";
+                    primary: true;
+                    clicked => {
+                        root.restart();
+                    }
+                }
+            }
+        }
+    }
+}
+
 // Horizontal drag handle that resizes the panel above it.
 component Splitter inherits Rectangle {
     callback dragged(length);
@@ -957,8 +1015,13 @@ export component AppWindow inherits Window {
     callback request-search-edited(string);
     callback select-request(int);
     callback select-service(int);
-    // Theme.name was changed from the settings menu; Rust saves the choice.
-    callback theme-changed();
+    // The saved theme. It may differ from Theme.name, the one this session
+    // started with, until the app restarts.
+    in-out property <ThemeName> chosen-theme;
+    in-out property <bool> restart-prompt-visible;
+    // A theme was picked in the settings menu; Rust saves it and asks to restart if needed.
+    callback theme-chosen(ThemeName);
+    callback restart-app();
     // Returns an error message, or "" when the service was created.
     callback create-service(string) -> string;
     callback add-row(RowTable);
@@ -990,14 +1053,14 @@ export component AppWindow inherits Window {
             icon: Icons.terminal,
             enabled: true,
             group-start: true,
-            checked: Theme.name == ThemeName.linux,
+            checked: root.chosen-theme == ThemeName.linux,
         },
         {
             action: SettingsAction.theme-yaru,
             label: "Yaru theme",
             icon: Icons.monitor,
             enabled: true,
-            checked: Theme.name == ThemeName.yaru,
+            checked: root.chosen-theme == ThemeName.yaru,
         },
         { action: SettingsAction.import-collection, label: "Import Collection", icon: Icons.download, group-start: true },
         { action: SettingsAction.export-collection, label: "Export Collection", icon: Icons.upload },
@@ -1013,11 +1076,9 @@ export component AppWindow inherits Window {
 
     function run-settings-action(action: SettingsAction) {
         if action == SettingsAction.theme-linux {
-            Theme.name = ThemeName.linux;
-            root.theme-changed();
+            root.theme-chosen(ThemeName.linux);
         } else if action == SettingsAction.theme-yaru {
-            Theme.name = ThemeName.yaru;
-            root.theme-changed();
+            root.theme-chosen(ThemeName.yaru);
         } else if action == SettingsAction.clear-response {
             root.response-state = ResponseState.idle;
         } else if action == SettingsAction.quit {
@@ -1161,6 +1222,18 @@ export component AppWindow inherits Window {
                     command: root.curl-command(root.draft);
                 }
             }
+        }
+    }
+
+    if root.restart-prompt-visible: RestartPrompt {
+        width: root.width;
+        height: root.height;
+        theme-label: root.chosen-theme == ThemeName.yaru ? "Yaru" : "Linux";
+        later => {
+            root.restart-prompt-visible = false;
+        }
+        restart => {
+            root.restart-app();
         }
     }
 }

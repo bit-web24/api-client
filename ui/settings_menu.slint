@@ -213,8 +213,9 @@ export component SettingsButton {
                     SettingsRow {
                         item: item;
                         activated => {
-                            menu.close();
+                            // Use `item` before closing: closing destroys the row it belongs to.
                             root.activated(item.action);
+                            menu.close();
                         }
                     }
                 }

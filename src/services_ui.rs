@@ -5,6 +5,7 @@
 use std::cell::RefCell;
 use std::io;
 use std::path::PathBuf;
+use std::process::Command;
 use std::rc::Rc;
 
 use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
@@ -37,8 +38,10 @@ impl Services {
             tables,
         });
         services.show(ui);
-        ui.global::<Theme>()
-            .set_name(theme_name(services.workspace.borrow().theme));
+        // The theme is applied once, here at startup; a theme chosen later asks for a restart.
+        let theme = theme_name(services.workspace.borrow().theme);
+        ui.global::<Theme>().set_name(theme);
+        ui.set_chosen_theme(theme);
         if let Some(problem) = problem {
             show_error(ui, problem);
         }
@@ -101,6 +104,42 @@ impl Services {
             show_error(ui, message);
         }
         Ok(())
+    }
+
+    /// Saves `name` as the theme and asks to restart when it differs from the
+    /// theme this session started with.
+    fn choose_theme(&self, ui: &AppWindow, name: ThemeName) {
+        self.workspace.borrow_mut().theme = theme_choice(name);
+        if let Err(message) = self.save() {
+            show_error(ui, message);
+        }
+        ui.set_chosen_theme(name);
+        ui.set_restart_prompt_visible(name != ui.global::<Theme>().get_name());
+    }
+
+    /// Saves everything, starts a new instance of the app with the same
+    /// arguments, and quits this one.
+    fn restart(&self, ui: &AppWindow) {
+        self.commit(ui);
+        let relaunch = std::env::current_exe()
+            .and_then(|exe| Command::new(exe).args(std::env::args_os().skip(1)).spawn());
+        match relaunch {
+            // The child runs on its own; this process only needs to exit.
+            Ok(_child) => {
+                if let Err(error) = slint::quit_event_loop() {
+                    show_error(ui, format!("Could not quit to restart: {error}"));
+                }
+            }
+            Err(error) => {
+                ui.set_restart_prompt_visible(false);
+                show_error(
+                    ui,
+                    format!(
+                        "Could not restart the app: {error}. Close and reopen it to apply the theme."
+                    ),
+                );
+            }
+        }
     }
 
     /// Saves the workspace, if there is a place to save it.
@@ -209,16 +248,21 @@ pub fn wire(ui: &AppWindow, services: &Rc<Services>) {
             }
         }
     });
-    ui.on_theme_changed({
+    ui.on_theme_chosen({
+        let ui_weak = ui.as_weak();
+        let services = services.clone();
+        move |name| {
+            if let Some(ui) = ui_weak.upgrade() {
+                services.choose_theme(&ui, name);
+            }
+        }
+    });
+    ui.on_restart_app({
         let ui_weak = ui.as_weak();
         let services = services.clone();
         move || {
-            let Some(ui) = ui_weak.upgrade() else {
-                return;
-            };
-            services.workspace.borrow_mut().theme = theme_choice(ui.global::<Theme>().get_name());
-            if let Err(message) = services.save() {
-                show_error(&ui, message);
+            if let Some(ui) = ui_weak.upgrade() {
+                services.restart(&ui);
             }
         }
     });

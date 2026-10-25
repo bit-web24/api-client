@@ -183,8 +183,9 @@ component ServiceSwitcher inherits Rectangle {
                     row-touch := TouchArea {
                         mouse-cursor: pointer;
                         clicked => {
-                            popup.close();
+                            // Use `index` before closing: closing destroys the row it belongs to.
                             root.select-service(index);
+                            popup.close();
                         }
                     }
                 }
